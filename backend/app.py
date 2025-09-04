@@ -1,25 +1,42 @@
 import os
 import json
 import datetime as dt
+from pathlib import Path
 
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import jwt
+import re
 
 from config import Config
 
-load_dotenv()
+# Carga explícita del .env que está junto a app.py
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Validar DATABASE_URL y enmascarar la contraseña para logs
+db_url = app.config.get("DATABASE_URL") or os.getenv("DATABASE_URL", "")
+if not db_url:
+    raise RuntimeError("DATABASE_URL no está definido. Revisa backend/.env")
+
+
+def _mask(url: str) -> str:
+    # Enmascara la contraseña en la URL: postgresql+psycopg2://usuario:***@host:puerto/db
+    # No usa look-behind: captura hasta el ':' antes de la contraseña y reemplaza lo que sigue hasta el '@'.
+    return re.sub(r'(://[^:@/]+):[^@/]+@', r'\1:***@', url)
+
+print("[DB] Usando DATABASE_URL:", _mask(db_url))
 
 # CORS
 CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"].split(",")}})
 
 # DB engine (SQLAlchemy Core)
-engine = create_engine(app.config["DATABASE_URL"], pool_pre_ping=True, future=True)
+engine = create_engine(db_url, pool_pre_ping=True, future=True)
+
 
 # Helpers
 def create_token(user_id, email):

@@ -2,13 +2,13 @@ import os
 import json
 import datetime as dt
 from pathlib import Path
+import re
 
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import jwt
-import re
 
 from config import Config
 
@@ -25,15 +25,14 @@ if not db_url:
 
 def _mask(url: str) -> str:
     # Mask password in URL: postgresql+psycopg2://user:***@host:port/db
-    # No look-behind: capture up to ':' before the password and replace until '@'.
     return re.sub(r'(://[^:@/]+):[^@/]+@', r'\1:***@', url)
 
 print("[DB] Using DATABASE_URL:", _mask(db_url))
 
-# CORS
+# CORS — use parsed list of origins
 CORS(
     app,
-    resources={r"/api/*": {"origins": Config.CORS_ORIGINS}},
+    resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
     supports_credentials=True
 )
 
@@ -45,19 +44,14 @@ app.config["ENGINE"] = engine
 from blueprints.inventory import bp as inventory_bp, init_schema as inventory_init_schema
 from blueprints.orders import bp as orders_bp, init_schema as orders_init_schema
 
-
-# Register blueprint under /api/v1 (routes inside the blueprint are relative)
+# Register under /api/v1
 app.register_blueprint(inventory_bp, url_prefix="/api/v1")
-
-
-# Initialize inventory schema at startup
 with app.app_context():
     inventory_init_schema(engine)
 
 app.register_blueprint(orders_bp, url_prefix="/api/v1")
 with app.app_context():
     orders_init_schema(engine)
-
 
 # ---- Helpers (Auth) ----
 def create_token(user_id, email, profile):
@@ -71,7 +65,6 @@ def create_token(user_id, email, profile):
     }
     token = jwt.encode(payload, app.config["JWT_SECRET"], algorithm="HS256")
     return token
-
 
 def require_auth(fn):
     from functools import wraps
@@ -91,6 +84,11 @@ def require_auth(fn):
     return wrapper
 
 # ---- Routes ----
+@app.get("/")
+def root():
+    # Friendly root to avoid 404s on provider health probes
+    return jsonify({"ok": True, "health": "/api/v1/health"}), 200
+
 @app.get("/api/v1/health")
 def health():
     return jsonify({"ok": True})
@@ -143,7 +141,6 @@ def login():
         },
         "prefs": prefs
     })
-
 
 @app.get("/api/v1/me")
 @require_auth

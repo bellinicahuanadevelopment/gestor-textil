@@ -9,15 +9,15 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false
+        sync: false   # set in the dashboard or via render CLI
       - key: JWT_SECRET
         sync: false
 
-  - type: static
+  - type: static_site
     name: gt-web
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    staticPublishPath: dist
+    publishPath: dist
     autoDeploy: true
     envVars:
       - key: VITE_API_URL

@@ -1,11 +1,10 @@
-# render.yaml — API (Python) + SPA (Vite) on Free tier
+# render.yaml — Flask API + Vite SPA
 
 services:
   # --- API (Flask) ---
   - type: web
     name: gt-api
     env: python
-    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -w 1 -k gthread --threads 4 -t 120 -b 0.0.0.0:$PORT app:app
@@ -17,12 +16,10 @@ services:
       - key: JWT_SECRET
         sync: false
 
-  # --- Frontend (Vite SPA) ---
+  # --- Frontend (Vite SPA served statically) ---
   - type: web
     name: gt-web
-    env: static            # ← static runtime (CDN); no numInstances allowed
-    # plan is optional for static; free is default. You can omit or keep:
-    plan: free
+    env: static                # static runtime (CDN)
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist

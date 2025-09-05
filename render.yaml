@@ -9,12 +9,12 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false   # set in the dashboard or via render CLI
+        sync: false   # set in Render dashboard/CLI
       - key: JWT_SECRET
         sync: false
 
-  - type: static_site
-    name: gt-web
+staticSites:
+  - name: gt-web
     rootDir: frontend
     buildCommand: npm ci && npm run build
     publishPath: dist

@@ -83,6 +83,17 @@ def require_auth(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+from werkzeug.exceptions import HTTPException
+
+@app.errorhandler(Exception)
+def _json_errors(e):
+    if isinstance(e, HTTPException):
+        return jsonify({"error": e.description}), e.code
+    # Log full stack for debugging
+    app.logger.exception(e)
+    return jsonify({"error": "Internal server error"}), 500
+
+
 # ---- Routes ----
 @app.get("/")
 def root():

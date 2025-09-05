@@ -31,7 +31,11 @@ def _mask(url: str) -> str:
 print("[DB] Using DATABASE_URL:", _mask(db_url))
 
 # CORS
-CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"].split(",")}})
+CORS(
+    app,
+    resources={r"/api/*": {"origins": Config.CORS_ORIGINS}},
+    supports_credentials=True
+)
 
 # DB engine (SQLAlchemy Core)
 engine = create_engine(db_url, pool_pre_ping=True, future=True)

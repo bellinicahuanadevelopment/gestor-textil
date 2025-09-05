@@ -1,7 +1,7 @@
 services:
   # --- API (Flask/Gunicorn)
   - type: web
-    name: gt-api
+    name: demotextiles-api
     env: python
     rootDir: backend
     plan: free
@@ -23,7 +23,7 @@ services:
 
   # --- Web App (Vite SPA served by Node)
   - type: web
-    name: gt-web
+    name: demotextiles
     env: node
     rootDir: frontend
     plan: free

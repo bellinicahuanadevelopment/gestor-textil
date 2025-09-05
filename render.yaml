@@ -9,7 +9,7 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false     # set via Render Dashboard/CLI
+        sync: false
       - key: JWT_SECRET
         sync: false
 
@@ -20,9 +20,7 @@ staticSites:
     publishPath: dist
     autoDeploy: true
     envVars:
-      # Pin Node for predictable builds (optional but recommended)
-      - key: NODE_VERSION
+      - key: NODE_VERSION     # optional but recommended for reproducible builds
         value: 20
-      # Point Vite to your API (update after first deploy if hostname differs)
-      - key: VITE_API_URL
+      - key: VITE_API_URL     # your frontend points here at build time
         value: https://gt-api.onrender.com/api/v1

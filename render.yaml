@@ -1,35 +1,38 @@
-# render.yaml — Flask API + Vite SPA
-
 services:
-  # --- API (Flask) ---
+  # --- API (Flask/Gunicorn)
   - type: web
     name: gt-api
     env: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 -k gthread --threads 4 -t 120 -b 0.0.0.0:$PORT app:app
-    healthCheckPath: /api/v1/health
-    autoDeploy: true
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    # Bind to Render's $PORT
+    startCommand: "gunicorn --worker-class gthread --threads 8 --workers 1 -b 0.0.0.0:$PORT app:app"
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: FLASK_ENV
+        value: production
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         sync: false
+      # (Optional) tighten CORS once the frontend URL is known
+      - key: CORS_ORIGINS
+        value: "https://gt-web.onrender.com"
 
-  # --- Frontend (Vite SPA served statically) ---
+  # --- Web App (Vite SPA served by Node)
   - type: web
     name: gt-web
-    env: static                # static runtime (CDN)
+    env: node
     rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    autoDeploy: true
+    plan: free
+    buildCommand: "npm ci && npm run build"
+    # Serve the static dist/ over $PORT (no SSR)
+    startCommand: "npx serve -s dist -l $PORT"
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Vite reads this at build time to hardcode your API base
       - key: VITE_API_URL
         value: "https://gt-api.onrender.com/api/v1"
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html

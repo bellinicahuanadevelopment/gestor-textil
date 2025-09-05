@@ -1,12 +1,20 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useAuth } from './contexts/AuthContext'
+import AppShell from './components/AppShell'
+
+// Pages
 import Login from './pages/Login'
 import Home from './pages/Home'
-import { useAuth } from './contexts/AuthContext'
+import Inventario from './pages/Inventario'
+import Pedidos from './pages/Pedidos'
+import NuevoPedido from './pages/NuevoPedido'
+import PedidoDetalle from './pages/PedidoDetalle'
 
 function PrivateRoute({ children }) {
-  const { isAuthenticated } = useAuth()
-  return isAuthenticated ? children : <Navigate to="/login" replace />
+  const { token } = useAuth()
+  if (!token) return <Navigate to="/login" replace />
+  return <AppShell>{children}</AppShell>
 }
 
 export default function App() {
@@ -14,11 +22,52 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={
-          <PrivateRoute>
-            <Home />
-          </PrivateRoute>
-        } />
+
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <Home />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/inventario"
+          element={
+            <PrivateRoute>
+              <Inventario />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/pedidos"
+          element={
+            <PrivateRoute>
+              <Pedidos />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/pedidos/nuevo"
+          element={
+            <PrivateRoute>
+              <NuevoPedido />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/pedidos/:id"
+          element={
+            <PrivateRoute>
+              <PedidoDetalle />
+            </PrivateRoute>
+          }
+        />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

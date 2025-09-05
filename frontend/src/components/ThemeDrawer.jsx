@@ -1,104 +1,188 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React from 'react';
 import {
-  Drawer, DrawerOverlay, DrawerContent, DrawerHeader, DrawerBody, DrawerCloseButton,
-  Stack, FormLabel, Select, Slider, SliderTrack, SliderFilledTrack, SliderThumb,
-  RadioGroup, Radio, HStack, Button, Switch, Text, useToast
-} from '@chakra-ui/react'
-import { useThemePrefs } from '../theme/ThemeContext'
-import { useAuth } from '../contexts/AuthContext'
-import { useAuthedFetch } from '../lib/api'
-
-const accents = ['teal','blue','green','purple','red','orange','cyan','pink']
-const fonts = ['Inter','System','Montserrat','Arial','Roboto']
-const radii = ['sm','md','lg','xl','2xl']
+  Drawer, DrawerOverlay, DrawerContent, DrawerHeader, DrawerBody,
+  SimpleGrid, Box, Text, HStack, VStack, useColorMode, Switch, Divider,
+  IconButton
+} from '@chakra-ui/react';
+import { useThemePrefs } from '../theme/ThemeContext';
+import { ACCENTS, FONT_OPTIONS } from '../theme/ThemeContext';
 
 export default function ThemeDrawer({ isOpen, onClose }) {
-  const { prefs, updatePrefs } = useThemePrefs()
-  const { isAuthenticated } = useAuth()
-  const { authedFetch } = useAuthedFetch()
-  const toast = useToast()
-  const saveTimer = useRef(null)
-  const [local, setLocal] = useState(prefs)
+  const { prefs, setPrefs } = useThemePrefs();
+  const { colorMode, toggleColorMode } = useColorMode();
+  const accent = prefs.accent || 'teal';
 
-  useEffect(() => { if (isOpen) setLocal(prefs) }, [isOpen, prefs])
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const MIN = 0.85;
+  const MAX = 1.30;
+  const STEP = 0.05;
 
-  const scheduleSave = useCallback(() => {
-    if (!isAuthenticated) return
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(async () => {
-      try {
-        const res = await authedFetch('/users/me/prefs', {
-          method: 'PUT',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ prefs: local })
-        })
-        if (!res.ok) throw new Error()
-        toast({ title:'Preferencias guardadas', status:'success', duration:1500 })
-      } catch {
-        toast({ title:'No se pudo guardar', status:'error', duration:2000 })
-      }
-    }, 600)
-  }, [local, isAuthenticated])
-
-  function setAndPersist(next) {
-    setLocal(prev => ({ ...prev, ...next }))
-    updatePrefs(next)      // actualiza tema en tiempo real
-    scheduleSave()         // y lo persiste en la API si hay sesión
-  }
+  const dec = () => setPrefs({ uiScale: clamp(Number((prefs.uiScale || 1) - STEP), MIN, MAX) });
+  const inc = () => setPrefs({ uiScale: clamp(Number((prefs.uiScale || 1) + STEP), MIN, MAX) });
+  const percent = Math.round((prefs.uiScale || 1) * 100);
 
   return (
-    <Drawer isOpen={isOpen} onClose={onClose} size="sm">
+    <Drawer isOpen={isOpen} placement="right" onClose={onClose} size="sm">
       <DrawerOverlay />
       <DrawerContent>
-        <DrawerCloseButton />
-        <DrawerHeader>Configuración de Tema</DrawerHeader>
+        <DrawerHeader display="flex" alignItems="center" justifyContent="space-between">
+          <Text>Theme Panel</Text>
+          <HStack>
+            <Text fontSize="sm" color="gray.500">Oscuro</Text>
+            <Switch
+              isChecked={colorMode === 'dark'}
+              onChange={() => {
+                toggleColorMode();
+                setPrefs({ colorMode: colorMode === 'dark' ? 'light' : 'dark' });
+              }}
+            />
+          </HStack>
+        </DrawerHeader>
+
         <DrawerBody>
-          <Stack spacing="5">
-            <HStack justify="space-between">
-              <FormLabel htmlFor="mode" m="0">Modo oscuro</FormLabel>
-              <Switch id="mode"
-                isChecked={local.colorMode === 'dark'}
-                onChange={(e)=> setAndPersist({ colorMode: e.target.checked ? 'dark' : 'light' })}
-              />
-            </HStack>
+          <VStack align="stretch" spacing={6}>
+            <Box>
+              <Text mb={3} fontSize="sm" color="gray.500">Color Palette</Text>
+              <SimpleGrid columns={6} spacing={3}>
+                {ACCENTS.map(c => (
+                  <Box
+                    key={c}
+                    as="button"
+                    aria-label={c}
+                    h="10"
+                    w="10"
+                    rounded="md"
+                    borderWidth="1px"
+                    borderColor={c === prefs.accent ? 'blackAlpha.600' : 'gray.200'}
+                    boxShadow={c === prefs.accent ? '0 0 0 2px rgba(0,0,0,0.6) inset' : 'none'}
+                    bg={`${c}.500`}
+                    onClick={() => setPrefs({ accent: c })}
+                  />
+                ))}
+              </SimpleGrid>
+            </Box>
 
-            <div>
-              <FormLabel>Color de acento</FormLabel>
-              <Select value={local.accent} onChange={(e)=> setAndPersist({ accent: e.target.value })}>
-                {accents.map(a => <option key={a} value={a}>{a}</option>)}
-              </Select>
-            </div>
+            <Divider />
 
-            <div>
-              <FormLabel>Fuente</FormLabel>
-              <Select value={local.font} onChange={(e)=> setAndPersist({ font: e.target.value })}>
-                {fonts.map(f => <option key={f} value={f}>{f}</option>)}
-              </Select>
-            </div>
+            <Box>
+              <Text mb={3} fontSize="sm" color="gray.500">Font Family</Text>
+              <SimpleGrid columns={4} spacing={3}>
+                {FONT_OPTIONS.map(f => {
+                  const selected = prefs.font === f.id;
+                  return (
+                    <VStack
+                      key={f.id}
+                      as="button"
+                      align="center"
+                      spacing={1}
+                      onClick={() => setPrefs({ font: f.id, fontStack: f.stack })}
+                    >
+                      <Box
+                        h="16"
+                        w="100%"
+                        rounded="md"
+                        borderWidth="1px"
+                        borderColor={selected ? 'blackAlpha.700' : 'gray.200'}
+                        boxShadow={selected ? '0 0 0 2px rgba(0,0,0,0.7) inset' : 'none'}
+                        display="grid"
+                        placeItems="center"
+                      >
+                        <Text fontFamily={f.stack} fontSize="2xl">Ag</Text>
+                      </Box>
+                      <Text fontSize="xs" color="gray.600">{f.label}</Text>
+                    </VStack>
+                  );
+                })}
+              </SimpleGrid>
+            </Box>
 
-            <div>
-              <FormLabel>Tamaño de UI</FormLabel>
-              <Slider min={0.9} max={1.2} step={0.05} value={local.uiScale}
-                onChange={(v)=> setAndPersist({ uiScale: v })}>
-                <SliderTrack><SliderFilledTrack /></SliderTrack>
-                <SliderThumb />
-              </Slider>
-              <Text mt="1" fontSize="sm">Actual: {local.uiScale.toFixed(2)}x</Text>
-            </div>
+            <Divider />
 
-            <div>
-              <FormLabel>Radio de bordes</FormLabel>
-              <RadioGroup value={local.radius} onChange={(v)=> setAndPersist({ radius: v })}>
-                <HStack>
-                  {radii.map(r => <Radio key={r} value={r}>{r}</Radio>)}
-                </HStack>
-              </RadioGroup>
-            </div>
+            <Box>
+              <Text mb={3} fontSize="sm" color="gray.500">Radius</Text>
+              <SimpleGrid columns={6} spacing={3}>
+                {['none','xs','sm','md','lg','xl','2xl'].map(r => {
+                  const selected = prefs.radius === r;
+                  const demoRadius = r === 'xs' ? '2px'
+                    : r === 'sm' ? '4px'
+                    : r === 'md' ? '6px'
+                    : r === 'lg' ? '10px'
+                    : r === 'xl' ? '14px'
+                    : r === '2xl' ? '18px' : '0';
+                  return (
+                    <VStack
+                      key={r}
+                      as="button"
+                      spacing={1}
+                      onClick={() => setPrefs({ radius: r })}
+                    >
+                      <Box
+                        h="16"
+                        w="100%"
+                        rounded="md"
+                        borderWidth="1px"
+                        borderColor={selected ? 'blackAlpha.700' : 'gray.200'}
+                        boxShadow={selected ? '0 0 0 2px rgba(0,0,0,0.7) inset' : 'none'}
+                        position="relative"
+                        bg="whiteAlpha.700"
+                        _dark={{ bg: 'whiteAlpha.100' }}
+                      >
+                        <Box
+                          position="absolute"
+                          top="1"
+                          right="1"
+                          w="5"
+                          h="5"
+                          bg="red.400"
+                          roundedTopRight={demoRadius}
+                        />
+                      </Box>
+                      <Text fontSize="xs" color="gray.600">{r}</Text>
+                    </VStack>
+                  );
+                })}
+              </SimpleGrid>
+            </Box>
 
-            <Button onClick={onClose}>Cerrar</Button>
-          </Stack>
+            <Divider />
+
+            {/* UI Size stepper */}
+            <Box>
+              <Text mb={3} fontSize="sm" color="gray.500">UI Size</Text>
+              <HStack>
+                <IconButton
+                  aria-label="Disminuir tamaño"
+                  onClick={dec}
+                  variant="outline"
+                  bg="white"
+                  _dark={{ bg: 'gray.800' }}
+                  borderColor="gray.300"
+                  rounded={prefs.radius}
+                  size="sm"
+                >
+                  –
+                </IconButton>
+                <Text w="12" textAlign="center" fontWeight="semibold">{percent}%</Text>
+                <IconButton
+                  aria-label="Aumentar tamaño"
+                  onClick={inc}
+                  variant="outline"
+                  bg="white"
+                  _dark={{ bg: 'gray.800' }}
+                  borderColor="gray.300"
+                  rounded={prefs.radius}
+                  size="sm"
+                >
+                  +
+                </IconButton>
+              </HStack>
+              <Text mt="2" fontSize="xs" color="gray.500">
+                Ajusta el tamaño general de la interfaz.
+              </Text>
+            </Box>
+          </VStack>
         </DrawerBody>
       </DrawerContent>
     </Drawer>
-  )
+  );
 }

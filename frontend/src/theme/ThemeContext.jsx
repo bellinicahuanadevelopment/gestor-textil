@@ -1,17 +1,51 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { extendTheme } from '@chakra-ui/react'
+import { mode } from '@chakra-ui/theme-tools'
 
 const ThemeCtx = createContext(null)
 
-// Opciones disponibles
-const ACCENTS = ['teal','blue','green','purple','red','orange','cyan','pink']
-const FONTS = ['Inter','System','Montserrat','Arial','Roboto']
-const RADII = ['sm','md','lg','xl','2xl']
+// Accent palette used across the app
+export const ACCENTS = ['teal','blue','green','purple','red','orange','cyan','pink']
+
+// Font options (restricted)
+export const FONT_OPTIONS = [
+  {
+    id: 'Inter',
+    label: 'Inter',
+    stack: "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'"
+  },
+  {
+    id: 'Outfit',
+    label: 'Outfit',
+    stack: "'Outfit', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'"
+  },
+  {
+    id: 'Geist',
+    label: 'Geist',
+    // falls back gracefully if Geist is not locally available
+    stack: "'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'"
+  },
+  {
+    id: 'Figtree',
+    label: 'Figtree',
+    stack: "'Figtree', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'"
+  }
+]
+
+// Legacy export (if any code still reads FONTS, it will get the ids above)
+export const FONTS = FONT_OPTIONS.map(f => f.id)
+
+export const RADII = ['sm','md','lg','xl','2xl']
+
+function stackFor(id) {
+  return FONT_OPTIONS.find(f => f.id === id)?.stack || FONT_OPTIONS[0].stack
+}
 
 const defaultPrefs = {
   colorMode: 'light',
   accent: 'teal',
   font: 'Inter',
+  fontStack: stackFor('Inter'),
   uiScale: 1.0,
   radius: 'md'
 }
@@ -19,27 +53,26 @@ const defaultPrefs = {
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)) }
 
 export function ThemePrefsProvider({ children }) {
-  const [prefs, setPrefs] = useState(() => {
+  const [prefs, setPrefsState] = useState(() => {
     try {
       const raw = localStorage.getItem('theme_prefs')
-      return raw ? { ...defaultPrefs, ...JSON.parse(raw) } : defaultPrefs
+      const merged = raw ? { ...defaultPrefs, ...JSON.parse(raw) } : defaultPrefs
+      // ensure we always have a valid stack even for older saved prefs
+      return { ...merged, fontStack: stackFor(merged.font) }
     } catch { return defaultPrefs }
   })
 
-  // Persistencia local
   useEffect(() => {
     localStorage.setItem('theme_prefs', JSON.stringify(prefs))
   }, [prefs])
 
-  // Construir el theme dinámico
   const theme = useMemo(() => {
-    const baseFont = prefs.font || 'Inter'
     const ui = clamp(Number(prefs.uiScale || 1), 0.85, 1.3)
-    const radius = RADII.includes(prefs.radius) ? prefs.radius : 'md'
-    const fonts = { heading: baseFont, body: baseFont }
+    const radiusKey = RADII.includes(prefs.radius) ? prefs.radius : 'md'
+
+    const fonts = { heading: prefs.fontStack, body: prefs.fontStack }
     const radii = { none: '0', sm: '0.125rem', md: '0.375rem', lg: '0.5rem', xl: '0.75rem', '2xl': '1rem' }
 
-    // Escalado ligero de tipografías
     const fontSizes = {
       xs: `${Math.round(12*ui)}px`,
       sm: `${Math.round(14*ui)}px`,
@@ -50,21 +83,36 @@ export function ThemePrefsProvider({ children }) {
       '3xl': `${Math.round(28*ui)}px`
     }
 
-    // ColorScheme por defecto para Button, etc., leyendo "accent"
     const components = {
-      Button: { defaultProps: { colorScheme: prefs.accent || 'teal', borderRadius: radius } },
-      Badge: { defaultProps: { colorScheme: prefs.accent || 'teal', borderRadius: radius } },
-      Input: { baseStyle: { field: { borderRadius: radius } } },
-      Select: { baseStyle: { field: { borderRadius: radius } } },
-      Menu: { baseStyle: { list: { borderRadius: radius } } },
-      Drawer: { baseStyle: { dialog: { borderRadius: radius } } },
-      Card: { baseStyle: { container: { borderRadius: radius } } }
+      Button: {
+        baseStyle: { borderRadius: radiusKey },
+        defaultProps: { colorScheme: prefs.accent || 'teal' }
+      },
+      Badge: { defaultProps: { colorScheme: prefs.accent || 'teal' } },
+      Input: { baseStyle: { field: { borderRadius: radiusKey } } },
+      Select: { baseStyle: { field: { borderRadius: radiusKey } } },
+      Menu: { baseStyle: { list: { borderRadius: radiusKey } } },
+      Drawer: { baseStyle: { dialog: { borderRadius: radiusKey } } },
+      Card: { baseStyle: { container: { borderRadius: radiusKey } } }
     }
 
     return extendTheme({
       config: {
-        initialColorMode: (prefs.colorMode === 'dark') ? 'dark' : 'light',
+        initialColorMode: prefs.colorMode === 'dark' ? 'dark' : 'light',
         useSystemColorMode: false
+      },
+      styles: {
+        global: (props) => ({
+          'html, body': {
+            background: mode('gray.50','gray.900')(props),
+            color: mode('gray.800','gray.100')(props)
+          },
+          '#root': {
+            minHeight: '100dvh',
+            background: 'inherit',
+            color: 'inherit'
+          }
+        })
       },
       fonts,
       radii,
@@ -74,10 +122,18 @@ export function ThemePrefsProvider({ children }) {
   }, [prefs])
 
   function updatePrefs(next) {
-    setPrefs(prev => ({ ...prev, ...next }))
+    setPrefsState(prev => {
+      const merged = { ...prev, ...next }
+      if (next && Object.prototype.hasOwnProperty.call(next, 'font')) {
+        merged.fontStack = stackFor(merged.font)
+      }
+      return merged
+    })
   }
 
-  // Recibir prefs desde backend al iniciar sesión
+  // Alias used by UI components (e.g., ThemeDrawer) for convenience
+  const setPrefs = updatePrefs
+
   function setPrefsFromServer(serverPrefs) {
     if (serverPrefs && typeof serverPrefs === 'object') {
       updatePrefs(serverPrefs)
@@ -85,9 +141,16 @@ export function ThemePrefsProvider({ children }) {
   }
 
   const value = useMemo(() => ({
-    prefs, updatePrefs, theme, setPrefsFromServer,
-    colorModeConfigScript: (prefs.colorMode === 'dark') ? 'dark' : 'light',
-    ACCENTS, FONTS, RADII
+    prefs,
+    updatePrefs,
+    setPrefs,
+    theme,
+    setPrefsFromServer,
+    colorModeConfigScript: prefs.colorMode === 'dark' ? 'dark' : 'light',
+    ACCENTS,
+    FONT_OPTIONS,
+    FONTS,
+    RADII
   }), [prefs, theme])
 
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>

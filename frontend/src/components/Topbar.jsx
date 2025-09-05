@@ -1,28 +1,43 @@
 import React from 'react'
 import {
-  Flex, Text, IconButton, Avatar, Menu, MenuButton, MenuItem, MenuList, HStack, Button
+  Flex,
+  Text,
+  IconButton,
+  Avatar,
+  HStack
 } from '@chakra-ui/react'
-import { SettingsIcon } from '@chakra-ui/icons'
+import { HamburgerIcon } from '@chakra-ui/icons'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function Topbar({ onOpenTheme }) {
-  const { user, logout } = useAuth()
+export default function Topbar({ onOpenSidebar }) {
+  const { user } = useAuth()
 
   return (
-    <Flex as="header" align="center" justify="space-between" px="4" py="3"
-      borderBottom="1px solid" borderColor="blackAlpha.100" _dark={{ borderColor: 'whiteAlpha.300' }}>
-      <Text fontWeight="bold" fontSize="xl">Gestor Textil</Text>
+    <Flex
+      as="header"
+      align="center"
+      justify="space-between"
+      px="4"
+      py="3"
+      borderBottom="1px solid"
+      bg="white"
+      borderColor="blackAlpha.100"
+      _dark={{ bg: 'gray.800', borderColor: 'whiteAlpha.300' }}
+      gap="3"
+    >
       <HStack spacing="3">
-        <Button leftIcon={<SettingsIcon />} onClick={onOpenTheme} variant="outline">Tema</Button>
-        <Menu>
-          <MenuButton as={IconButton} aria-label="Usuario" variant="outline">
-            <Avatar size="sm" name={user?.nombre_completo || 'Usuario'} />
-          </MenuButton>
-          <MenuList>
-            <MenuItem disabled>{user?.nombre_completo || 'Usuario'}</MenuItem>
-            <MenuItem onClick={logout}>Cerrar sesión</MenuItem>
-          </MenuList>
-        </Menu>
+        <IconButton
+          display={{ base: 'inline-flex', md: 'none' }}
+          aria-label="Abrir menú"
+          icon={<HamburgerIcon />}
+          variant="outline"
+          onClick={onOpenSidebar}
+        />
+        <Text fontWeight="bold" fontSize="xl">Gestor Textil</Text>
+      </HStack>
+
+      <HStack spacing="3">
+        <Avatar size="sm" name={user?.nombre_completo || 'Usuario'} />
       </HStack>
     </Flex>
   )

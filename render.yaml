@@ -1,16 +1,20 @@
+# render.yaml — Free plan, API + SPA
 services:
   # --- API (Flask) ---
   - type: web
     name: gt-api
     env: python
+    plan: free                 # <— free tier
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 2 -k gthread -t 120 -b 0.0.0.0:$PORT app:app
+    # keep it light for free dyno memory/CPU
+    startCommand: gunicorn -w 1 -k gthread --threads 4 -t 120 -b 0.0.0.0:$PORT app:app
     healthCheckPath: /api/v1/health
+    numInstances: 1
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false          # set this in the Render dashboard/CLI
+        sync: false            # set in Dashboard/CLI
       - key: JWT_SECRET
         sync: false
 
@@ -18,15 +22,17 @@ services:
   - type: web
     name: gt-web
     env: static
+    plan: free                 # <— free tier
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
+    numInstances: 1
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: "20"
       - key: VITE_API_URL
-        value: "https://gt-api.onrender.com/api/v1"   # update to actual API URL after first deploy
+        value: "https://gt-api.onrender.com/api/v1"  # update after API deploy if hostname differs
     routes:
       - type: rewrite
         source: /*

@@ -17,6 +17,17 @@ load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
 app = Flask(__name__)
 app.config.from_object(Config)
+def _parse_cors(origins):
+    # Accept list or comma-separated string
+    if isinstance(origins, (list, tuple)):
+        return [o.strip() for o in origins if o and str(o).strip()]
+    if isinstance(origins, str):
+        return [o.strip() for o in origins.split(",") if o.strip()]
+    return []
+
+CORS_ALLOWED = _parse_cors(Config.CORS_ORIGINS)
+print("[CORS] Allowed origins:", CORS_ALLOWED)
+
 
 # Validate DATABASE_URL and mask password in logs
 db_url = app.config.get("DATABASE_URL") or os.getenv("DATABASE_URL", "")
@@ -32,8 +43,8 @@ print("[DB] Using DATABASE_URL:", _mask(db_url))
 # CORS — use parsed list of origins
 CORS(
     app,
-    resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
-    supports_credentials=True
+    resources={r"/api/*": {"origins": CORS_ALLOWED}},
+    supports_credentials=False,  # using Authorization header, not cookies
 )
 
 # DB engine (SQLAlchemy Core)
@@ -92,6 +103,19 @@ def _json_errors(e):
     # Log full stack for debugging
     app.logger.exception(e)
     return jsonify({"error": "Internal server error"}), 500
+
+@app.get("/api/v1/debug/config")
+def debug_config():
+    # DO NOT expose secrets; mask DB
+    return jsonify({
+        "cors_allowed": CORS_ALLOWED,
+        "database_url_masked": _mask(db_url),
+        "env_seen": {
+            "DATABASE_URL": bool(os.environ.get("DATABASE_URL")),
+            "JWT_SECRET": bool(os.environ.get("JWT_SECRET")),
+            "CORS_ORIGINS": os.environ.get("CORS_ORIGINS"),
+        },
+    })
 
 
 # ---- Routes ----

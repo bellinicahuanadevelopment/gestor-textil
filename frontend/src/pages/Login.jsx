@@ -3,6 +3,7 @@ import {
   Box, Button, FormControl, FormLabel, Input, VStack, Heading, useToast
 } from '@chakra-ui/react'
 import { useAuth } from '../contexts/AuthContext'
+import ApiDebugBadge from '../components/ApiDebugBadge'
 import { useNavigate } from 'react-router-dom'
 
 export default function Login() {
@@ -42,6 +43,7 @@ export default function Login() {
           </FormControl>
           <Button type="submit" isLoading={loading} w="full">Ingresar</Button>
         </VStack>
+        {process.env.NODE_ENV !== 'production' || import.meta.env.VITE_DEBUG === '1' ? <ApiDebugBadge /> : null}
       </Box>
     </Box>
   )

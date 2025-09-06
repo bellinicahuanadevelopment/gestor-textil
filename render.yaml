@@ -1,38 +1,36 @@
+apiVersion: 1
+
 services:
-  # --- API (Flask/Gunicorn)
   - type: web
     name: demotextiles-api
     env: python
-    rootDir: backend
     plan: free
+    rootDir: backend
     buildCommand: "pip install -r requirements.txt"
-    # Bind to Render's $PORT
     startCommand: "gunicorn --worker-class gthread --threads 8 --workers 1 -b 0.0.0.0:$PORT app:app"
+    healthCheckPath: /api/v1/health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: FLASK_ENV
-        value: production
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         sync: false
-      # (Optional) tighten CORS once the frontend URL is known
       - key: CORS_ORIGINS
-        value: "https://gt-web.onrender.com"
+        # include your static site URL after first deploy, comma-separated if multiple
+        value: "https://demotextiles.onrender.com,http://localhost:5173"
 
-  # --- Web App (Vite SPA served by Node)
-  - type: web
-    name: demotextiles
-    env: node
+staticSites:
+  - name: demotextiles-web
     rootDir: frontend
-    plan: free
     buildCommand: "npm ci && npm run build"
-    # Serve the static dist/ over $PORT (no SSR)
-    startCommand: "npx serve -s dist -l $PORT"
+    publishPath: dist
+    # free tier friendly; no plan/instances for static
     envVars:
+      - key: VITE_API_URL
+        value: "https://demotextiles-api.onrender.com/api/v1"
       - key: NODE_VERSION
         value: "20"
-      # Vite reads this at build time to hardcode your API base
-      - key: VITE_API_URL
-        value: "https://gt-api.onrender.com/api/v1"
+    routes:
+      # SPA routing so deep links work
+      - type: rewrite
+        source: "/*"
+        destination: "/index.html"

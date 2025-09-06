@@ -1,5 +1,3 @@
-apiVersion: 1
-
 services:
   - type: web
     name: gestor-textil-api
@@ -19,17 +17,15 @@ services:
         # Add your static site URL after first deploy, comma-separated if multiple
         value: "https://gestor-textil-web.onrender.com,http://localhost:5173"
 
-staticSites:
-  - name: gestor-textil-web
+  - type: static
+    name: gestor-textil-web
     rootDir: frontend
     buildCommand: "npm ci && npm run build"
-    publishPath: dist
+    staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        # Used by src/lib/api.js (detectApiBase). Point to the API base with /api/v1
         value: "https://gestor-textil-api.onrender.com/api/v1"
       - key: VITE_API_BASE_URL
-        # Used by AuthContext.jsx
         value: "https://gestor-textil-api.onrender.com/api/v1"
       - key: NODE_VERSION
         value: "20"

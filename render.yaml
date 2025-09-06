@@ -8,7 +8,6 @@ services:
   - type: web
     name: gestor-textil-api
     runtime: python
-    plan: free
     rootDir: backend
     region: oregon
     buildCommand: "pip install -r requirements.txt"
@@ -34,7 +33,6 @@ services:
   - type: web
     name: gestor-textil-web
     runtime: static
-    plan: free
     rootDir: frontend
     buildCommand: "npm install && npm run build"
     staticPublishPath: frontend/dist

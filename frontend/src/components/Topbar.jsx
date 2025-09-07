@@ -30,7 +30,7 @@ export default function Topbar({ onOpenSidebar }) {
           display={{ base: 'inline-flex', md: 'none' }}
           aria-label="Abrir menú"
           icon={<HamburgerIcon />}
-          variant="outline"
+          variant="ghost"
           onClick={onOpenSidebar}
         />
         <Text fontWeight="bold" fontSize="xl">Gestor Textil</Text>

@@ -4,9 +4,6 @@ import {
   VStack,
   HStack,
   Text,
-  Input,
-  InputGroup,
-  InputLeftElement,
   Icon,
   Collapse,
   Divider,
@@ -17,7 +14,6 @@ import {
   Button
 } from '@chakra-ui/react'
 import {
-  SearchIcon,
   ViewIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -170,20 +166,24 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
       overflow="hidden"
     >
       <VStack spacing="4" align="stretch">
-        <Tooltip label={showIconsOnly ? 'Expandir menú' : 'Colapsar menú'} placement="right" openDelay={300}>
-          <RowWithIcon
-            leftIcon={<Icon as={HamburgerIcon} boxSize="5" />}
-            hoverBg={hoverBg}
-            activeBg="transparent"
-            activeColor="inherit"
-            color="inherit"
-            onClick={onToggleCollapse}
-          >
-            {showIconsOnly ? null : (
-              <Text fontSize="sm" color={muted}>Menú</Text>
-            )}
-          </RowWithIcon>
-        </Tooltip>
+        {!isInDrawer && (
+          <Box display={{ base: 'none', md: 'block' }}>
+            <Tooltip label={showIconsOnly ? 'Expandir menú' : 'Colapsar menú'} placement="right" openDelay={300}>
+              <RowWithIcon
+                leftIcon={<Icon as={HamburgerIcon} boxSize="5" />}
+                hoverBg={hoverBg}
+                activeBg="transparent"
+                activeColor="inherit"
+                color="inherit"
+                onClick={onToggleCollapse}
+              >
+                {showIconsOnly ? null : (
+                  <Text fontSize="sm" color={muted}>Menú</Text>
+                )}
+              </RowWithIcon>
+            </Tooltip>
+          </Box>
+        )}
 
         <RowWithIcon
           leftIcon={
@@ -201,26 +201,6 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
           )}
         </RowWithIcon>
 
-        {showIconsOnly ? (
-          <Tooltip label="Buscar" placement="right" openDelay={300}>
-            <RowWithIcon
-              leftIcon={<Icon as={SearchIcon} boxSize="5" />}
-              hoverBg={hoverBg}
-              activeBg="transparent"
-              activeColor="inherit"
-              color={muted}
-            />
-          </Tooltip>
-        ) : (
-          <InputGroup>
-            <InputLeftElement pointerEvents="none">
-              <SearchIcon color={muted} />
-            </InputLeftElement>
-            <Input placeholder="Buscar" variant="filled" height="10" />
-          </InputGroup>
-        )}
-
-        {/* Primary navigation only */}
         <VStack align="stretch" spacing="1" mt="1">
           <NavItem
             icon={ViewIcon}
@@ -261,6 +241,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
           >
             Nuevo pedido
           </NavItem>
+
           <NavItem
             icon={SettingsIcon}
             to="/configuracion"

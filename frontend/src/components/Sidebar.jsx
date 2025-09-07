@@ -1,4 +1,3 @@
-/* Full file with two extra NavItem entries for /pedidos and /pedidos/nuevo */
 import React, { useEffect, useState, forwardRef } from 'react'
 import {
   Box,
@@ -20,12 +19,9 @@ import {
 import {
   SearchIcon,
   ViewIcon,
-  TimeIcon,
-  StarIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   AttachmentIcon,
-  QuestionOutlineIcon,
   SettingsIcon,
   HamburgerIcon
 } from '@chakra-ui/icons'
@@ -110,7 +106,6 @@ function NavItem({ icon, children, to, isActive, onClick, rightIcon, showIconsOn
 
 export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpenTheme }) {
   const { pathname } = useLocation()
-  const [docsOpen, setDocsOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [pendingOpenAccount, setPendingOpenAccount] = useState(false)
   const { user, logout } = useAuth()
@@ -225,6 +220,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
           </InputGroup>
         )}
 
+        {/* Primary navigation only */}
         <VStack align="stretch" spacing="1" mt="1">
           <NavItem
             icon={ViewIcon}
@@ -265,58 +261,13 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
           >
             Nuevo pedido
           </NavItem>
-        </VStack>
-
-        <Divider my="3" />
-
-        <VStack align="stretch" spacing="1">
           <NavItem
-            icon={TimeIcon}
-            to="/analisis"
-            isActive={pathname === '/analisis'}
+            icon={SettingsIcon}
+            to="/configuracion"
+            isActive={pathname === '/configuracion'}
             showIconsOnly={showIconsOnly}
             accent={accent}
           >
-            Análisis
-          </NavItem>
-
-          <NavItem
-            icon={AttachmentIcon}
-            isActive={pathname.startsWith('/documentos')}
-            onClick={() => {}}
-            rightIcon={ChevronRightIcon}
-            showIconsOnly={showIconsOnly}
-            accent={accent}
-          >
-            Documentos
-          </NavItem>
-
-          <NavItem
-            icon={TimeIcon}
-            to="/historial"
-            isActive={pathname === '/historial'}
-            showIconsOnly={showIconsOnly}
-            accent={accent}
-          >
-            Historial
-          </NavItem>
-
-          <NavItem
-            icon={StarIcon}
-            to="/favoritos"
-            isActive={pathname === '/favoritos'}
-            showIconsOnly={showIconsOnly}
-            accent={accent}
-          >
-            Favoritos
-          </NavItem>
-
-          <Divider my="3" />
-
-          <NavItem icon={QuestionOutlineIcon} to="/ayuda" showIconsOnly={showIconsOnly} accent={accent}>
-            Centro de ayuda
-          </NavItem>
-          <NavItem icon={SettingsIcon} to="/configuracion" showIconsOnly={showIconsOnly} accent={accent}>
             Configuración
           </NavItem>
         </VStack>

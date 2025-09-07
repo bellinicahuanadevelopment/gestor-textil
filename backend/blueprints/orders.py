@@ -1,9 +1,11 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 import jwt
 import datetime
 from decimal import Decimal
 import json
+import os
 
 bp = Blueprint("orders", __name__)
 
@@ -15,26 +17,52 @@ def get_engine():
         raise RuntimeError("DB engine not available")
     return eng
 
-def auth_user_id():
+# --- Auth helpers ------------------------------------------------------------
+
+def _jwt_claims():
+    """Decode Authorization bearer token and return claims or {}."""
     auth = request.headers.get("Authorization", "")
     if not auth.lower().startswith("bearer "):
-        return None
+        return {}
     token = auth.split(" ", 1)[1].strip()
     try:
-        payload = jwt.decode(token, current_app.config["JWT_SECRET"], algorithms=["HS256"])
-        return payload.get("sub") or payload.get("user_id")
+        return jwt.decode(token, current_app.config["JWT_SECRET"], algorithms=["HS256"])
     except Exception:
-        return None
+        return {}
+
+def auth_user_id():
+    claims = _jwt_claims()
+    return claims.get("sub") or claims.get("user_id")
+
+def _current_profile():
+    # try Flask g first (when @require_auth was used)
+    prof = getattr(g, "user_profile", None) or (getattr(g, "user", {}) or {}).get("profile")
+    if prof:
+        return prof
+    # fallback: decode token directly (most endpoints in this bp handle auth manually)
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, current_app.config["JWT_SECRET"], algorithms=["HS256"])
+            return payload.get("profile")
+        except Exception:
+            return None
+    return None
+
+def _require_approver():
+    return _current_profile() in ("manager", "admin")
+
+# --- Schema bootstrap --------------------------------------------------------
 
 def init_schema(engine=None):
     eng = engine or get_engine()
 
-    # Phase 1: enum setup in AUTOCOMMIT so new labels are usable immediately
+    # Phase 1: enum setup in AUTOCOMMIT
     with eng.connect() as raw:
         conn = raw.execution_options(isolation_level="AUTOCOMMIT")
         conn.execute(text("create extension if not exists pgcrypto"))
 
-        # Create type if missing
         conn.execute(text("""
         do $do$
         begin
@@ -44,8 +72,6 @@ def init_schema(engine=None):
         end
         $do$;
         """))
-
-        # Add any missing labels (each DO runs in autocommit)
         for label in ("draft", "submitted", "approved", "cancelled"):
             conn.execute(text("""
             do $do$
@@ -62,7 +88,7 @@ def init_schema(engine=None):
             $do$;
             """), {"label": label})
 
-    # Phase 2: create tables (separate transaction)
+    # Phase 2: tables + approval audit columns
     with eng.begin() as conn:
         conn.execute(text("""
         create table if not exists public.pedidos (
@@ -91,6 +117,110 @@ def init_schema(engine=None):
           created_at timestamptz not null default now()
         )
         """))
+
+        # --- approval audit columns (idempotent) ---
+        conn.execute(text("alter table public.pedidos add column if not exists approved_at timestamptz"))
+        conn.execute(text("alter table public.pedidos add column if not exists approved_by uuid"))
+        conn.execute(text("alter table public.pedidos add column if not exists approved_fecha_local date"))
+        conn.execute(text("alter table public.pedidos add column if not exists approved_hora_local time"))
+
+        # FK for approved_by if missing
+        conn.execute(text("""
+        do $do$
+        begin
+          if not exists (
+            select 1
+            from information_schema.table_constraints
+            where table_schema='public'
+              and table_name='pedidos'
+              and constraint_name='pedidos_approved_by_fkey'
+          ) then
+            alter table public.pedidos
+              add constraint pedidos_approved_by_fkey
+              foreign key (approved_by) references public.usuarios(id);
+          end if;
+        end
+        $do$;
+        """))
+
+# --- Routes ------------------------------------------------------------------
+
+@bp.post("/pedidos/<uuid:pedido_id>/approve")
+def approve_order(pedido_id):
+    # Must be manager
+    if not _require_approver():
+        return jsonify({"ok": False, "message": "No autorizado: requiere perfil manager"}), 403
+
+    claims = _jwt_claims()
+    approver_id = claims.get("sub") or claims.get("user_id")
+    if not approver_id:
+        return jsonify({"ok": False, "message": "Token inválido"}), 401
+
+    engine = current_app.config["ENGINE"]
+
+    # Allow flexible status labels unless explicitly set
+    candidates = [os.environ.get("APPROVED_STATUS") or "approved", "aprobado", "Aprobado", "APPROVED", "APROBADO"]
+
+    try:
+      with engine.begin() as conn:
+        # Ensure order exists & not already approved
+        head = conn.execute(
+            text("select id, status from public.pedidos where id = :id"),
+            {"id": str(pedido_id)}
+        ).mappings().first()
+        if not head:
+            return jsonify({"ok": False, "message": "Pedido no encontrado"}), 404
+
+        # Try to set status + audit fields
+        row = None
+        last_err = None
+        for st in [c for c in candidates if c]:
+            try:
+                r = conn.execute(
+                    text("""
+                      update public.pedidos
+                      set status = :st,
+                          approved_at = now(),
+                          approved_by = :uid,
+                          approved_fecha_local = current_date,
+                          approved_hora_local = current_time
+                      where id = :id
+                      returning id, status, approved_at, approved_by, approved_fecha_local, approved_hora_local
+                    """),
+                    {"st": st, "id": str(pedido_id), "uid": str(approver_id)}
+                )
+                row = r.fetchone()
+                if row:
+                    break
+            except SQLAlchemyError as e:
+                last_err = e
+                continue
+
+        if not row:
+            # Found but enum label not accepted
+            if last_err:
+                current_app.logger.warning("approve enum mismatch: %s", last_err)
+            return jsonify({
+                "ok": False,
+                "message": "No se pudo actualizar el estado. Revise los valores del enum order_status o defina APPROVED_STATUS."
+            }), 409
+
+        # Serialize
+        approved_at = row.approved_at.isoformat() if isinstance(row.approved_at, datetime.datetime) else None
+        return jsonify({
+            "ok": True,
+            "pedido": {
+                "id": str(row.id),
+                "status": row.status,
+                "approved_at": approved_at,
+                "approved_by": str(row.approved_by) if row.approved_by else None,
+                "approved_fecha_local": row.approved_fecha_local.isoformat() if isinstance(row.approved_fecha_local, datetime.date) else None,
+                "approved_hora_local": row.approved_hora_local.isoformat(timespec="minutes") if isinstance(row.approved_hora_local, datetime.time) else None,
+            }
+        })
+    except SQLAlchemyError:
+        current_app.logger.exception("Error aprobando pedido")
+        return jsonify({"ok": False, "message": "Error del servidor"}), 500
 
 @bp.post("/pedidos/start")
 def start_order():
@@ -186,7 +316,8 @@ def get_order(pedido_id):
     with eng.begin() as conn:
         head = conn.execute(
             text("""select id, status, cliente_nombre, cliente_telefono, direccion_entrega,
-                           fecha_entrega, fecha_local, hora_local, created_at
+                           fecha_entrega, fecha_local, hora_local, created_at,
+                           approved_at, approved_by, approved_fecha_local, approved_hora_local
                    from public.pedidos where id = :id"""),
             {"id": str(pedido_id)}
         ).mappings().first()
@@ -209,6 +340,14 @@ def get_order(pedido_id):
         h["hora_local"] = h["hora_local"].isoformat(timespec="minutes")
     if isinstance(h.get("created_at"), datetime.datetime):
         h["created_at"] = h["created_at"].isoformat()
+    if isinstance(h.get("approved_at"), datetime.datetime):
+        h["approved_at"] = h["approved_at"].isoformat()
+    if isinstance(h.get("approved_fecha_local"), datetime.date):
+        h["approved_fecha_local"] = h["approved_fecha_local"].isoformat()
+    if isinstance(h.get("approved_hora_local"), datetime.time):
+        h["approved_hora_local"] = h["approved_hora_local"].isoformat(timespec="minutes")
+    if h.get("approved_by"):
+        h["approved_by"] = str(h["approved_by"])
 
     out_items = []
     for i in items:
@@ -357,15 +496,28 @@ def submit_order(pedido_id):
         )
     return jsonify({"ok": True})
 
-@bp.delete("/pedidos/<uuid:pedido_id>")
+# REPLACE the existing delete endpoint with this one
+
+@bp.route("/pedidos/<uuid:pedido_id>", methods=["DELETE"])
+@bp.route("/pedidos/<pedido_id>", methods=["DELETE"])  # also accept string ids
 def delete_order(pedido_id):
     user_id = auth_user_id()
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
+
+    # Coerce UUID or string to str for SQL
+    pid = str(pedido_id)
+
     eng = get_engine()
     with eng.begin() as conn:
-        conn.execute(text("delete from public.pedido_items where pedido_id = :pid"), {"pid": str(pedido_id)})
-        gone = conn.execute(text("delete from public.pedidos where id = :pid returning id"), {"pid": str(pedido_id)}).first()
+        # remove items first (in case FK doesn't cascade)
+        conn.execute(text("delete from public.pedido_items where pedido_id = :pid"), {"pid": pid})
+        gone = conn.execute(
+            text("delete from public.pedidos where id = :pid returning id"),
+            {"pid": pid}
+        ).first()
         if not gone:
             return jsonify({"error": "Pedido no encontrado"}), 404
+
     return jsonify({"ok": True})
+

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { useThemePrefs } from '../theme/ThemeContext'
 
 const AuthCtx = createContext(null)
-const API_BASE = import.meta.env.VITE_API_BASE_URL
+const API_BASE = import.meta.env.VITE_API_URL
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(localStorage.getItem('auth_token') || '')

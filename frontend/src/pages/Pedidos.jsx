@@ -73,12 +73,13 @@ export default function Pedidos() {
 
   const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
   const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
+  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`) // ← accent title
 
   return (
     <Box>
       <HStack justify="space-between" align="center" mb="4">
         <Heading size="lg">Pedidos</Heading>
-        <Button as={Link} to="/pedidos/nuevo" colorScheme={accent} variant={'solid'}>Nuevo pedido</Button>
+        <Button as={Link} to="/pedidos/nuevo" colorScheme={accent} variant="solid">Nuevo pedido</Button>
       </HStack>
 
       <HStack mb="4" align="center">
@@ -127,7 +128,7 @@ export default function Pedidos() {
             <CardHeader pb="2">
               <HStack justify="space-between" align="start">
                 <Box>
-                  <Heading size="md">{p.cliente_nombre}</Heading>
+                  <Heading size="lg" color={titleColor}>{p.cliente_nombre}</Heading>
                   <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
                 </Box>
                 <Badge colorScheme={statusColor(p.status)} textTransform="none">{p.status}</Badge>

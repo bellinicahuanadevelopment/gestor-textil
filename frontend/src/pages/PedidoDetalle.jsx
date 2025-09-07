@@ -1,25 +1,32 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Card, CardBody, CardHeader, Button,
   IconButton, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper,
-  NumberDecrementStepper, Spacer, Badge, Tabs, TabList, Tab, Select, useColorModeValue,
+  NumberDecrementStepper, Spacer, Badge, Tabs, TabList, Tab, useColorModeValue,
   useToast, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter,
-  Input, InputGroup, InputLeftElement, ButtonGroup, Tooltip
+  Input, InputGroup, InputLeftElement, Tooltip, useBreakpointValue,
+  AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogContent, AlertDialogOverlay, useDisclosure
 } from '@chakra-ui/react'
 import {
-   ArrowBackIcon, DeleteIcon, AddIcon, SearchIcon, ViewIcon, HamburgerIcon, CheckIcon
+  ArrowBackIcon, DeleteIcon, AddIcon, SearchIcon, CheckIcon,
+  ChevronLeftIcon, ChevronRightIcon
 } from '@chakra-ui/icons'
+import { FiSave } from 'react-icons/fi'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthedFetch } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
 
 function money(n){try{return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(Number(n||0))}catch{return `${n}`}}
+const fmtTime = (d)=> new Intl.DateTimeFormat('es-CO',{hour:'2-digit',minute:'2-digit'}).format(d)
 
 export default function PedidoDetalle(){
   const { id } = useParams()
   const navigate = useNavigate()
   const { authedFetch } = useAuthedFetch()
   const { prefs } = useThemePrefs()
+  const { user } = useAuth()
   const accent = prefs?.accent || 'teal'
   const toast = useToast()
 
@@ -27,9 +34,15 @@ export default function PedidoDetalle(){
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
-  const [viewMode, setViewMode] = useState('list')
   const [dirtyIds, setDirtyIds] = useState(() => new Set())
   const [saving, setSaving] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // delete dialog
+  const { isOpen: isDeleteOpen, onOpen: openDelete, onClose: closeDelete } = useDisclosure()
+  const cancelRef = useRef()
 
   async function load(){
     setLoading(true)
@@ -37,23 +50,39 @@ export default function PedidoDetalle(){
     const data = await res.json()
     setHead(data.pedido || null)
     setItems(Array.isArray(data.items) ? data.items : [])
-    setDirtyIds(new Set()) // reset unsaved state after load
+    setDirtyIds(new Set())
     setLoading(false)
   }
   useEffect(()=>{ load() },[id])
 
-  // removeItem / deleteOrder unchanged
+  const isApprover = ['manager', 'admin'].includes(user?.profile)
+  const isApproved = (status) => {
+    const s = String(status || '').toLowerCase()
+    return s === 'approved' || s === 'aprobado'
+  }
+  const isDraft = (status) => String(status||'').toLowerCase() === 'draft'
+  const canEdit = head && !isApproved(head.status)
+
+  // removeItem
   async function removeItem(itemId){
     const r = await authedFetch(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' })
     if(!r.ok){ toast({status:'error', title:'No se pudo eliminar el ítem'}) ; return }
     toast({status:'success', title:'Ítem eliminado'})
     load()
   }
-  async function deleteOrder(){
+
+  // confirm delete (from dialog)
+  async function confirmDelete(){
+    setDeleting(true)
     const r = await authedFetch(`/pedidos/${id}`, { method:'DELETE' })
-    if(!r.ok){ toast({status:'error', title:'No se pudo eliminar el pedido'}) ; return }
+    setDeleting(false)
+    if(!r.ok){
+      toast({status:'error', title:'No se pudo eliminar el pedido'})
+      return
+    }
     toast({status:'success', title:'Pedido eliminado'})
-    navigate('/pedidos')  
+    closeDelete()
+    navigate('/pedidos')
   }
 
   // Save all edited items
@@ -83,6 +112,50 @@ export default function PedidoDetalle(){
     }
   }
 
+  // ---- Approval (optimistic)
+  async function handleApprove(){
+    if (!isApprover || !head || isApproved(head.status)) return
+    const prev = head.status
+    const optimisticAt = new Date()
+    setHead(h => h ? { ...h, status: 'approved', approved_at: optimisticAt.toISOString() } : h)
+    setApproving(true)
+    try {
+      const r = await authedFetch(`/pedidos/${id}/approve`, { method:'POST' })
+      const data = await r.json().catch(()=> ({}))
+      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
+      const newStatus = data?.pedido?.status || 'approved'
+      const approvedAt = data?.pedido?.approved_at ? new Date(data.pedido.approved_at) : optimisticAt
+      setHead(h => h ? { ...h, status: newStatus, approved_at: approvedAt.toISOString() } : h)
+      toast({
+        status:'success',
+        title:'Pedido aprobado',
+        description:`Aprobado a las ${fmtTime(approvedAt)}`
+      })
+    } catch (err) {
+      setHead(h => h ? { ...h, status: prev, approved_at: undefined } : h)
+      toast({ status:'error', title:'No se pudo aprobar', description: String(err?.message || err) })
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  // ---- Submit (draft → submitted) for regular users
+  async function handleSubmit(){
+    if (!head || !isDraft(head.status)) return
+    setSubmitting(true)
+    try {
+      const r = await authedFetch(`/pedidos/${id}/submit`, { method:'POST' })
+      const data = await r.json().catch(()=> ({}))
+      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
+      setHead(h => h ? { ...h, status: 'submitted' } : h)
+      toast({ status:'success', title:'Pedido enviado' })
+    } catch (err) {
+      toast({ status:'error', title:'No se pudo enviar', description: String(err?.message || err) })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   // ——— Look & feel
   const underline = useColorModeValue(`${accent}.500`, `${accent}.300`)
   const pillBg = useColorModeValue(`${accent}.50`, `${accent}.900`)
@@ -93,6 +166,11 @@ export default function PedidoDetalle(){
   const panelBg = useColorModeValue('transparent', 'transparent')
 
   const dirtyCount = dirtyIds.size
+  const compact = useBreakpointValue({ base: true, md: false })
+
+  const showApprove = isApprover && head && !isApproved(head.status)
+  const showSubmit = !isApprover && head && isDraft(head.status)
+  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
 
   return (
     <Box>
@@ -104,15 +182,17 @@ export default function PedidoDetalle(){
         </Text>
       )}
 
-      {/* Top bar */}
-      <HStack
-        align="center"
+      {/* Top bar — responsive layout */}
+      <Stack
+        direction={{ base: 'column', md: 'row' }}
+        align={{ base: 'stretch', md: 'center' }}
         justify="space-between"
         bg={barBg}
         borderBottom="1px solid"
         borderColor={barBorder}
         pb="3"
         mb="3"
+        spacing={{ base: 3, md: 2 }}
       >
         {/* LEFT: back arrow + tabs */}
         <HStack spacing="2" align="center">
@@ -134,57 +214,142 @@ export default function PedidoDetalle(){
           </Tabs>
         </HStack>
 
-        {/* RIGHT: controls (unchanged) */}
-        <HStack spacing="3">
-          <HStack spacing="2" display={{ base:'none', md:'flex' }}>
-            <Text fontSize="sm" color={muted}>Ordenar</Text>
-            <Select size="sm" defaultValue="name" w="44">
-              <option value="name">Nombre</option>
-              <option value="ref">Referencia</option>
-              <option value="recent">Reciente</option>
-            </Select>
-          </HStack>
-
-          <ButtonGroup isAttached size="sm" variant="outline">
-            <Tooltip label="Vista lista">
-              <IconButton
-                aria-label="Vista lista"
-                icon={<HamburgerIcon />}
-                onClick={()=>setViewMode('list')}
-                colorScheme={viewMode==='list' ? accent : undefined}
-                variant={viewMode==='list' ? 'solid' : 'outline'}
-              />
+        {/* RIGHT: actions */}
+        <HStack spacing="2" justify="flex-end">
+          {/* Submit (regular users while draft) */}
+          {showSubmit && (
+            <Tooltip label="Enviar pedido">
+              {compact ? (
+                <IconButton
+                  aria-label="Enviar pedido"
+                  icon={<CheckIcon />}
+                  colorScheme="blue"
+                  onClick={handleSubmit}
+                  isDisabled={submitting}
+                  isLoading={submitting}
+                />
+              ) : (
+                <Button
+                  leftIcon={<CheckIcon />}
+                  colorScheme="blue"
+                  onClick={handleSubmit}
+                  isDisabled={submitting}
+                  isLoading={submitting}
+                >
+                  Enviar
+                </Button>
+              )}
             </Tooltip>
-            <Tooltip label="Vista grid">
-              <IconButton
-                aria-label="Vista grid"
-                icon={<ViewIcon />}
-                onClick={()=>setViewMode('grid')}
-                colorScheme={viewMode==='grid' ? accent : undefined}
-                variant={viewMode==='grid' ? 'solid' : 'outline'}
-              />
+          )}
+
+          {/* Approve (only managers & not approved) */}
+          {showApprove && (
+            <Tooltip label="Aprobar pedido">
+              {compact ? (
+                <IconButton
+                  aria-label="Aprobar pedido"
+                  icon={<CheckIcon />}
+                  colorScheme={accent}
+                  onClick={handleApprove}
+                  isDisabled={approving}
+                  isLoading={approving}
+                />
+              ) : (
+                <Button
+                  leftIcon={<CheckIcon />}
+                  colorScheme={accent}
+                  onClick={handleApprove}
+                  isDisabled={approving}
+                  isLoading={approving}
+                >
+                  Aprobar
+                </Button>
+              )}
             </Tooltip>
-          </ButtonGroup>
+          )}
 
-          <Button
-            leftIcon={<CheckIcon />}
-            colorScheme={accent}
-            onClick={saveAll}
-            isDisabled={dirtyCount === 0 || saving}
-            isLoading={saving}
-          >
-            Guardar{dirtyCount ? ` (${dirtyCount})` : ''}
-          </Button>
+          {/* Save */}
+          <Tooltip label={dirtyCount ? `Guardar cambios (${dirtyCount})` : (canEdit ? 'Nada por guardar' : 'Pedido aprobado')}>
+            {compact ? (
+              <IconButton
+                aria-label="Guardar cambios"
+                icon={<FiSave />}
+                colorScheme={accent}
+                onClick={saveAll}
+                isDisabled={!canEdit || dirtyCount === 0 || saving}
+                isLoading={saving}
+              />
+            ) : (
+              <Button
+                leftIcon={<FiSave />}
+                colorScheme={accent}
+                onClick={saveAll}
+                isDisabled={!canEdit || dirtyCount === 0 || saving}
+                isLoading={saving}
+                variant={canEdit ? 'solid' : 'outline'}
+              >
+                Guardar{dirtyCount ? ` (${dirtyCount})` : ''}
+              </Button>
+            )}
+          </Tooltip>
 
-          <Button leftIcon={<AddIcon />} colorScheme={accent} onClick={()=>setAdding(true)}>
-            Agregar ítem
-          </Button>
+          {/* Delete order — opens alert dialog */}
+          <Tooltip label={canEdit ? 'Eliminar pedido' : 'No se puede eliminar un pedido aprobado'}>
+            {compact ? (
+              <IconButton
+                aria-label="Eliminar pedido"
+                icon={<DeleteIcon />}
+                colorScheme={accent}
+                variant="solid"
+                onClick={openDelete}
+                isDisabled={!canEdit || deleting}
+                isLoading={deleting}
+              />
+            ) : (
+              <Button
+                leftIcon={<DeleteIcon />}
+                colorScheme={accent}
+                variant="solid"
+                onClick={openDelete}
+                isDisabled={!canEdit || deleting}
+                isLoading={deleting}
+              >
+                Eliminar
+              </Button>
+            )}
+          </Tooltip>
         </HStack>
-      </HStack>
-
+      </Stack>
 
       {/* Items panel */}
       <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
+        {/* Add item button at panel top-right */}
+        <HStack justify="flex-end" mb="2">
+          <Tooltip label={canEdit ? 'Agregar ítem' : 'Pedido aprobado'}>
+            {compact ? (
+              <IconButton
+                aria-label="Agregar ítem"
+                icon={<AddIcon />}
+                colorScheme={accent}
+                onClick={()=>setAdding(true)}
+                isDisabled={!canEdit}
+                size="sm"
+              />
+            ) : (
+              <Button
+                leftIcon={<AddIcon />}
+                colorScheme={accent}
+                onClick={()=>setAdding(true)}
+                isDisabled={!canEdit}
+                variant={canEdit ? 'solid' : 'outline'}
+                size="sm"
+              >
+                Agregar ítem
+              </Button>
+            )}
+          </Tooltip>
+        </HStack>
+
         {loading && <Text color={muted} p="4">Cargando…</Text>}
 
         <Stack spacing="3">
@@ -193,23 +358,24 @@ export default function PedidoDetalle(){
               <CardHeader pb="2">
                 <HStack justify="space-between" align="start">
                   <Box>
-                    <Heading size="sm">{it.descripcion}</Heading>
-                    <Text fontSize="xs" color={muted}>Ref: {it.referencia}</Text>
+                    <Heading size="lg" color={useColorModeValue(`${accent}.700`, `${accent}.200`)}>{it.descripcion}</Heading>
+                    <Text fontSize="sm" color={muted}>Ref: {it.referencia}</Text>
                   </Box>
                   <IconButton
-                    aria-label="Eliminar"
+                    aria-label="Eliminar ítem"
                     icon={<DeleteIcon />}
                     size="sm"
                     variant="outline"
-                    colorScheme="red"
+                    colorScheme={accent}
                     onClick={()=>removeItem(it.id)}
+                    isDisabled={!canEdit}
                   />
                 </HStack>
               </CardHeader>
               <CardBody pt="2">
                 <HStack spacing="6" align="end" wrap="wrap">
                   <Box>
-                    <Text fontSize="xs" color={muted}>Cantidad</Text>
+                    <Text fontSize="md" color={muted}>Cantidad</Text>
                     <NumberInput
                       value={it.cantidad}
                       min={0}
@@ -221,6 +387,7 @@ export default function PedidoDetalle(){
                         setDirtyIds(prev => new Set(prev).add(it.id))
                       }}
                       maxW="140px"
+                      isDisabled={!canEdit}
                     >
                       <NumberInputField />
                       <NumberInputStepper>
@@ -231,7 +398,7 @@ export default function PedidoDetalle(){
                   </Box>
 
                   <Box>
-                    <Text fontSize="xs" color={muted}>Precio</Text>
+                    <Text fontSize="md" color={muted}>Precio</Text>
                     <NumberInput
                       value={it.precio}
                       min={0}
@@ -242,6 +409,7 @@ export default function PedidoDetalle(){
                         setDirtyIds(prev => new Set(prev).add(it.id))
                       }}
                       maxW="180px"
+                      isDisabled={!canEdit}
                     >
                       <NumberInputField />
                       <NumberInputStepper>
@@ -254,7 +422,7 @@ export default function PedidoDetalle(){
                   <Spacer />
 
                   <Box>
-                    <Text fontSize="xs" color={muted}>Subtotal</Text>
+                    <Text fontSize="md" color={muted}>Subtotal</Text>
                     <Text fontWeight="semibold">
                       {money((Number(it.cantidad)||0)*(Number(it.precio)||0))}
                     </Text>
@@ -272,14 +440,44 @@ export default function PedidoDetalle(){
         </Stack>
       </Box>
 
-      {/* Modal unchanged except availability math */}
+      {/* Add Item Modal */}
       <AddItemModal
         isOpen={adding}
         onClose={()=>setAdding(false)}
         onAdded={load}
         pedidoId={id}
         orderItems={items}
+        lock={!canEdit}
       />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        isOpen={isDeleteOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={closeDelete}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Eliminar pedido
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              ¿Seguro que deseas eliminar este pedido? Esta acción no se puede deshacer.
+              Se eliminarán el pedido y todos sus ítems.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} variant="outline" colorScheme={accent} onClick={closeDelete}>
+                Cancelar
+              </Button>
+              <Button colorScheme={accent} onClick={confirmDelete} ml={3} isLoading={deleting}>
+                Eliminar
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Box>
   )
 }
@@ -315,8 +513,8 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
   )
 }
 
-/* Item picker modal (keeps corrected availability) */
-function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
+/* Item picker modal */
+function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], lock=false }){
   const { authedFetch } = useAuthedFetch()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
@@ -397,9 +595,13 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
             <Spacer />
             <HStack>
               <Text fontSize="sm" color="gray.500">Mostrar</Text>
-              <Select size="sm" value={pageSize} onChange={e=>setPageSize(Number(e.target.value))} w="72px">
+              <select
+                value={pageSize}
+                onChange={e=>setPageSize(Number(e.target.value))}
+                style={{ border: '1px solid var(--chakra-colors-gray-200)', borderRadius: 6, padding: '6px 8px' }}
+              >
                 <option value={5}>5</option><option value={10}>10</option><option value={15}>15</option>
-              </Select>
+              </select>
             </HStack>
           </HStack>
 
@@ -414,12 +616,12 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
                   <CardHeader pb="2">
                     <HStack justify="space-between" align="start">
                       <Box>
-                        <Heading size="sm">{p.descripcion}</Heading>
+                        <Heading size="lg" color={useColorModeValue(`${accent}.700`, `${accent}.200`)}>{p.descripcion}</Heading>
                         <Text fontSize="xs" color="gray.500">Ref: {p.referencia}</Text>
                       </Box>
                       <VStack spacing="0" align="flex-end">
                         <Text fontSize="xs" color="gray.500">Disponible</Text>
-                        <Text fontWeight="semibold">{available}</Text>
+                        <Text fontWeight="semibold" size="lg" color={useColorModeValue(`${accent}.700`, `${accent}.200`)}>{available}</Text>
                       </VStack>
                     </HStack>
                   </CardHeader>
@@ -433,6 +635,7 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
                           max={available}
                           onChange={(_,v)=>setQtyById(prev=>({...prev, [p.id]: isFinite(v)?v:0}))}
                           w="160px"
+                          isDisabled={lock}
                         >
                           <NumberInputField />
                           <NumberInputStepper>
@@ -441,7 +644,7 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
                           </NumberInputStepper>
                         </NumberInput>
                       </Box>
-                      <Button leftIcon={<AddIcon />} colorScheme={accent} onClick={()=>add(p)} isDisabled={available<=0}>
+                      <Button leftIcon={<AddIcon />} colorScheme={accent} onClick={()=>add(p)} isDisabled={available<=0 || lock}>
                         Agregar
                       </Button>
                     </HStack>
@@ -451,15 +654,27 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [] }){
             })}
           </Stack>
 
-          <HStack mt="4" justify="space-between">
+          {/* Centered pager */}
+          <HStack mt="4" justify="center" spacing="6">
+            <IconButton
+              aria-label="Página anterior"
+              icon={<ChevronLeftIcon />}
+              variant="outline"
+              size="sm"
+              isDisabled={safePage <= 1}
+              onClick={()=>setPage(p=>Math.max(1, p-1))}
+            />
             <Text fontSize="sm" color="gray.600">
-              {total===0?'0':`${start+1}–${Math.min(start+pageSize,total)}`} de {total}
+              Página {safePage} de {totalPages}
             </Text>
-            <HStack>
-              <Button size="sm" variant="outline" onClick={()=>setPage(p=>Math.max(1,p-1))} isDisabled={safePage<=1}>Anterior</Button>
-              <Text fontSize="sm">Página {safePage} / {totalPages}</Text>
-              <Button size="sm" colorScheme={accent} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} isDisabled={safePage>=totalPages}>Siguiente</Button>
-            </HStack>
+            <IconButton
+              aria-label="Página siguiente"
+              icon={<ChevronRightIcon />}
+              variant="outline"
+              size="sm"
+              isDisabled={safePage >= totalPages}
+              onClick={()=>setPage(p=>Math.min(totalPages, p+1))}
+            />
           </HStack>
         </ModalBody>
         <ModalFooter>

@@ -4,7 +4,7 @@ import datetime as dt
 from pathlib import Path
 import re
 
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, make_response
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
@@ -17,6 +17,18 @@ load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# ---- Catch-all for CORS preflights ----
+@app.route("/api/<path:_any>", methods=["OPTIONS"])
+def _cors_preflight_api(_any):
+    # Empty 204 is enough; Flask-CORS will add the Access-Control-Allow-* headers
+    return make_response("", 204)
+
+@app.route("/api/v1/<path:_any>", methods=["OPTIONS"])
+def _cors_preflight_api_v1(_any):
+    return make_response("", 204)
+
+
 def _parse_cors(origins):
     # Accept list or comma-separated string
     if isinstance(origins, (list, tuple)):
@@ -27,7 +39,6 @@ def _parse_cors(origins):
 
 CORS_ALLOWED = _parse_cors(Config.CORS_ORIGINS)
 print("[CORS] Allowed origins:", CORS_ALLOWED)
-
 
 # Validate DATABASE_URL and mask password in logs
 db_url = app.config.get("DATABASE_URL") or os.getenv("DATABASE_URL", "")
@@ -40,11 +51,15 @@ def _mask(url: str) -> str:
 
 print("[DB] Using DATABASE_URL:", _mask(db_url))
 
-# CORS — use parsed list of origins
+# CORS — allow preflight and auth header explicitly (case-insensitive)
 CORS(
     app,
     resources={r"/api/*": {"origins": CORS_ALLOWED}},
     supports_credentials=False,  # using Authorization header, not cookies
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "authorization", "Content-Type", "content-type"],
+    expose_headers=["Content-Type"],
+    max_age=86400,
 )
 
 # DB engine (SQLAlchemy Core)
@@ -89,12 +104,24 @@ def require_auth(fn):
             payload = jwt.decode(token, app.config["JWT_SECRET"], algorithms=["HS256"])
         except Exception:
             return jsonify({"error": "Token inválido o expirado"}), 401
-        g.user_id = payload.get("sub")
+
+        # Expose user info for downstream checks (e.g., manager)
+        g.user_id = payload.get("sub") or payload.get("user_id")
         g.email = payload.get("email")
+        g.user_profile = payload.get("profile")
+        g.user = {"id": g.user_id, "email": g.email, "profile": g.user_profile}
+
         return fn(*args, **kwargs)
     return wrapper
 
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, NotFound
+
+@app.errorhandler(NotFound)
+def _not_found(e):
+    # If this was a CORS preflight to any /api/* URL, treat as OK to satisfy the browser
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return make_response("", 204)
+    return jsonify({"error": "Not found"}), 404
 
 @app.errorhandler(Exception)
 def _json_errors(e):
@@ -116,7 +143,6 @@ def debug_config():
             "CORS_ORIGINS": os.environ.get("CORS_ORIGINS"),
         },
     })
-
 
 # ---- Routes ----
 @app.get("/")
@@ -220,7 +246,82 @@ def update_prefs():
         )
     return jsonify({"ok": True, "prefs": prefs})
 
+# --- Admin/Manager user management endpoints ---------------------------------
+from uuid import UUID
+
+def _is_admin_or_manager():
+    prof = getattr(g, "user_profile", None)
+    return prof in ("admin", "manager")
+
+@app.get("/api/v1/admin/users")
+@require_auth
+def admin_list_users():
+    if not _is_admin_or_manager():
+        return jsonify({"error": "No autorizado"}), 403
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            select id, nombre_completo, email, profile, created_at
+            from public.usuarios
+            order by created_at desc
+            limit 500
+        """)).mappings().all()
+    return jsonify([dict(r) for r in rows])
+
+@app.post("/api/v1/admin/users")
+@require_auth
+def admin_create_user():
+    if not _is_admin_or_manager():
+        return jsonify({"error": "No autorizado"}), 403
+
+    body = request.get_json(silent=True) or {}
+    nombre = (body.get("nombre_completo") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    profile = (body.get("profile") or "viewer").strip()
+
+    if not (nombre and email and password):
+        return jsonify({"error":"nombre_completo, email y password son requeridos"}), 400
+    if profile not in ("viewer","seller","manager","admin"):
+        return jsonify({"error":"perfil inválido"}), 400
+
+    with engine.begin() as conn:
+        # Unicidad de email
+        exists = conn.execute(text("select 1 from public.usuarios where email = :e"), {"e": email}).scalar()
+        if exists:
+            return jsonify({"error":"Ya existe un usuario con ese email"}), 409
+
+        # Asegurar pgcrypto (orders.init_schema la crea, pero por si acaso)
+        conn.execute(text("create extension if not exists pgcrypto"))
+
+        row = conn.execute(text("""
+            insert into public.usuarios (nombre_completo, email, password_hash, profile)
+            values (:n, :e, crypt(:p, gen_salt('bf')), :pr)
+            returning id, nombre_completo, email, profile, created_at
+        """), {"n": nombre, "e": email, "p": password, "pr": profile}).mappings().first()
+
+    return jsonify(dict(row)), 201
+
+@app.delete("/api/v1/admin/users/<uuid:user_id>")
+@require_auth
+def admin_delete_user(user_id):
+    if not _is_admin_or_manager():
+        return jsonify({"error": "No autorizado"}), 403
+    # Evitar borrarse a sí mismo
+    if str(user_id) == str(g.user_id):
+        return jsonify({"error":"No puedes borrar tu propio usuario"}), 400
+
+    with engine.begin() as conn:
+        # Borrar preferencias primero (FK sin ON DELETE CASCADE)
+        conn.execute(text("delete from public.usuarios_prefs where user_id = :uid"), {"uid": str(user_id)})
+        gone = conn.execute(text("delete from public.usuarios where id = :uid returning id"), {"uid": str(user_id)}).first()
+        if not gone:
+            return jsonify({"error":"Usuario no encontrado"}), 404
+
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     # Bind to 0.0.0.0 and pick PORT from env/config with a safe default
     port = int(os.environ.get("PORT", app.config.get("PORT", 5000)))
     app.run(host="0.0.0.0", port=port, debug=True)
+

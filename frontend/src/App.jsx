@@ -10,6 +10,7 @@ import Inventario from './pages/Inventario'
 import Pedidos from './pages/Pedidos'
 import NuevoPedido from './pages/NuevoPedido'
 import PedidoDetalle from './pages/PedidoDetalle'
+import Configuracion from './pages/Configuracion'
 
 function PrivateRoute({ children }) {
   const { token } = useAuth()
@@ -64,6 +65,16 @@ export default function App() {
           element={
             <PrivateRoute>
               <PedidoDetalle />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Wrap Configuración so it shows Sidebar/Topbar */}
+        <Route
+          path="/configuracion"
+          element={
+            <PrivateRoute>
+              <Configuracion />
             </PrivateRoute>
           }
         />

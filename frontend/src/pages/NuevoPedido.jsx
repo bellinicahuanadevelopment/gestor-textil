@@ -3,7 +3,7 @@ import {
   Box, Heading, Text, Stack, HStack, VStack, Input, Button,
   FormControl, FormLabel, Card, CardHeader, CardBody,
   NumberInput, NumberInputField, useDisclosure, useToast,
-  useColorModeValue, useBreakpointValue
+  useColorModeValue, useBreakpointValue, useToken
 } from '@chakra-ui/react'
 import { CheckIcon } from '@chakra-ui/icons'
 import { useAuthedFetchJson } from '../lib/api'
@@ -27,6 +27,8 @@ function Stepper({ step, accent }) {
   const dotSize = useBreakpointValue({ base: '6', md: '8' })
   const labelSize = useBreakpointValue({ base: 'sm', md: 'md' })
   const gap = useBreakpointValue({ base: 2, md: 4 })
+  const dotSizeCss = useToken('sizes', dotSize) // p.ej. "1.5rem"
+
 
   if (orientation === 'vertical') {
     return (
@@ -60,9 +62,14 @@ function Stepper({ step, accent }) {
                   {`Step ${index}`}
                 </Text>
               </HStack>
-              {index < labels.length && (
-                <Box ml={dotSize} h="6" w="2px" bg={index < step ? lineActive : grayLine} />
-              )}
+                {index < labels.length && (
+                  <Box
+                    ml={`calc(${dotSizeCss} / 2 - 1px)`}
+                    h="6"
+                    w="2px"
+                    bg={index < step ? lineActive : grayLine}
+                  />
+                )}
             </VStack>
           )
         })}

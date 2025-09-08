@@ -76,7 +76,9 @@ export default function Pedidos() {
 
   const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
   const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
-  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`) // ← accent title
+  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
+  const barBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
+  const panelBg = useColorModeValue('transparent', 'transparent')
 
   const skeletonCards = Array.from({ length: pageSize })
 
@@ -118,71 +120,73 @@ export default function Pedidos() {
         </HStack>
       </HStack>
 
-      <Stack spacing="4">
-        {loading ? (
-          skeletonCards.map((_, i) => (
-            <Card key={`s-${i}`} variant="outline">
-              <CardHeader pb="2">
-                <HStack justify="space-between" align="start">
-                  <Box w="full">
-                    <Skeleton height="28px" maxW="240px" />
-                    <SkeletonText mt="2" noOfLines={1} maxW="300px" />
-                  </Box>
-                  <Skeleton height="22px" width="80px" />
-                </HStack>
-              </CardHeader>
-              <CardBody pt="2">
-                <HStack justify="space-between" wrap="wrap">
-                  <SkeletonText noOfLines={1} maxW="200px" />
-                  <HStack>
-                    <SkeletonText noOfLines={1} maxW="220px" />
-                  </HStack>
-                </HStack>
-              </CardBody>
-            </Card>
-          ))
-        ) : (
-          <>
-            {pageRows.map(p => (
-              <Card
-                key={p.id}
-                as={Link}
-                to={`/pedidos/${p.id}`}
-                variant="outline"
-                cursor="pointer"
-                _hover={{ borderColor: `${accent}.300` }}
-                _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
-              >
+      <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
+        <Stack spacing="4">
+          {loading ? (
+            skeletonCards.map((_, i) => (
+              <Card key={`s-${i}`} variant="outline">
                 <CardHeader pb="2">
                   <HStack justify="space-between" align="start">
-                    <Box>
-                      <Heading size="lg" color={titleColor}>{p.cliente_nombre}</Heading>
-                      <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
+                    <Box w="full">
+                      <Skeleton height="28px" maxW="240px" />
+                      <SkeletonText mt="2" noOfLines={1} maxW="300px" />
                     </Box>
-                    <Badge colorScheme={statusColor(p.status)} textTransform="none">{p.status}</Badge>
+                    <Skeleton height="22px" width="80px" />
                   </HStack>
                 </CardHeader>
                 <CardBody pt="2">
                   <HStack justify="space-between" wrap="wrap">
-                    <Text fontSize="sm" color="gray.600">Entrega: {p.fecha_entrega}</Text>
+                    <SkeletonText noOfLines={1} maxW="200px" />
                     <HStack>
-                      <Text fontSize="sm" color="gray.500">Ítems:</Text>
-                      <Text fontWeight="semibold">{p.items_count}</Text>
-                      <Text fontSize="sm" color="gray.500" ml="4">Total:</Text>
-                      <Text fontWeight="semibold">{money(p.total)}</Text>
+                      <SkeletonText noOfLines={1} maxW="220px" />
                     </HStack>
                   </HStack>
                 </CardBody>
               </Card>
-            ))}
-            {pageRows.length === 0 && (
-              <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
-                {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
-              </Box>
-            )}
-          </>
-        )}
-      </Stack>
+            ))
+          ) : (
+            <>
+              {pageRows.map(p => (
+                <Card
+                  key={p.id}
+                  as={Link}
+                  to={`/pedidos/${p.id}`}
+                  variant="outline"
+                  cursor="pointer"
+                  _hover={{ borderColor: `${accent}.300` }}
+                  _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
+                >
+                  <CardHeader pb="2">
+                    <HStack justify="space-between" align="start">
+                      <Box>
+                        <Heading size="lg" color={titleColor}>{p.cliente_nombre}</Heading>
+                        <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
+                      </Box>
+                      <Badge colorScheme={statusColor(p.status)} textTransform="none">{p.status}</Badge>
+                    </HStack>
+                  </CardHeader>
+                  <CardBody pt="2">
+                    <HStack justify="space-between" wrap="wrap">
+                      <Text fontSize="sm" color="gray.600">Entrega: {p.fecha_entrega}</Text>
+                      <HStack>
+                        <Text fontSize="sm" color="gray.500">Ítems:</Text>
+                        <Text fontWeight="semibold">{p.items_count}</Text>
+                        <Text fontSize="sm" color="gray.500" ml="4">Total:</Text>
+                        <Text fontWeight="semibold">{money(p.total)}</Text>
+                      </HStack>
+                    </HStack>
+                  </CardBody>
+                </Card>
+              ))}
+              {pageRows.length === 0 && (
+                <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
+                  {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
+                </Box>
+              )}
+            </>
+          )}
+        </Stack>
+      </Box>
 
       <HStack mt="6" justify="space-between" align="center" flexWrap="wrap" gap="3">
         <Text fontSize="sm" color="gray.600">

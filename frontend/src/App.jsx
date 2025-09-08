@@ -11,6 +11,8 @@ import Pedidos from './pages/Pedidos'
 import NuevoPedido from './pages/NuevoPedido'
 import PedidoDetalle from './pages/PedidoDetalle'
 import Configuracion from './pages/Configuracion'
+import UsuarioDetalle from './pages/UsuarioDetalle'
+
 
 function PrivateRoute({ children }) {
   const { token } = useAuth()
@@ -78,6 +80,16 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
+        <Route
+          path="/configuracion/usuarios/:id"
+          element={
+            <PrivateRoute>
+              <UsuarioDetalle />
+            </PrivateRoute>
+          }
+        />
+
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

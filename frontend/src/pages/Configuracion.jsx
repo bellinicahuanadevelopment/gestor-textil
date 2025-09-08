@@ -12,6 +12,7 @@ import { AddIcon, DeleteIcon, SearchIcon } from '@chakra-ui/icons'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuthedFetchJson } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { Link } from 'react-router-dom'
 
 function AccentTab({ label, underline, disabled=false }) {
   return (
@@ -40,6 +41,7 @@ export default function Configuracion(){
   const toast = useToast()
 
   const canManage = user?.profile === 'admin' || user?.profile === 'manager'
+  const isAdmin = user?.profile === 'admin'
 
   // look & feel
   const underline = useColorModeValue(`${accent}.500`, `${accent}.300`)
@@ -99,7 +101,7 @@ export default function Configuracion(){
     }
   }
 
-  // delete user dialog
+  // delete user dialog (admins only)
   const [toDelete, setToDelete] = useState(null)
   const delDisc = useDisclosure()
   async function confirmDelete(){
@@ -183,43 +185,58 @@ export default function Configuracion(){
                   )}
                 </HStack>
 
-                {/* Users as independent cards */}
+                {/* Users as independent cards; clickable only for admins */}
                 <Stack spacing="3">
-                  {filtered.map(u => (
-                    <Card key={u.id} variant="outline">
-                      <CardHeader pb="2">
-                        <HStack align="start" justify="space-between">
-                          <Box>
-                            <Heading size="md">{u.nombre_completo}</Heading>
-                            <Text fontSize="sm" color="gray.500">{u.email}</Text>
-                          </Box>
-                          <Badge colorScheme={
-                            u.profile === 'admin' ? 'purple' :
-                            u.profile === 'manager' ? 'blue' : 'gray'
-                          } textTransform="none">
-                            {u.profile}
-                          </Badge>
-                        </HStack>
-                      </CardHeader>
-                      <CardBody pt="2">
-                        <HStack justify="space-between" align="center" wrap="wrap" gap="3">
-                          <Text fontSize="sm" color="gray.600">
-                            Creado: {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
-                          </Text>
-                          <Tooltip label="Eliminar usuario">
-                            <IconButton
-                              aria-label="Eliminar usuario"
-                              icon={<DeleteIcon />}
-                              size="sm"
-                              variant="outline"
-                              colorScheme="red"
-                              onClick={() => { setToDelete(u); delDisc.onOpen() }}
-                            />
-                          </Tooltip>
-                        </HStack>
-                      </CardBody>
-                    </Card>
-                  ))}
+                  {filtered.map(u => {
+                    const asProp = isAdmin ? Link : undefined
+                    const toProp = isAdmin ? `/configuracion/usuarios/${u.id}` : undefined
+                    return (
+                      <Card
+                        key={u.id}
+                        as={asProp}
+                        to={toProp}
+                        variant="outline"
+                        cursor={isAdmin ? 'pointer' : 'default'}
+                        _hover={isAdmin ? { borderColor: `${accent}.300` } : undefined}
+                        _focusWithin={isAdmin ? { borderColor: `${accent}.400`, boxShadow: 'outline' } : undefined}
+                      >
+                        <CardHeader pb="2">
+                          <HStack align="start" justify="space-between">
+                            <Box>
+                              <Heading size="md">{u.nombre_completo}</Heading>
+                              <Text fontSize="sm" color="gray.500">{u.email}</Text>
+                            </Box>
+                            <Badge colorScheme={
+                              u.profile === 'admin' ? 'purple' :
+                              u.profile === 'manager' ? 'blue' : 'gray'
+                            } textTransform="none">
+                              {u.profile}
+                            </Badge>
+                          </HStack>
+                        </CardHeader>
+                        <CardBody pt="2">
+                          <HStack justify="space-between" align="center" wrap="wrap" gap="3">
+                            <Text fontSize="sm" color="gray.600">
+                              Creado: {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
+                            </Text>
+
+                            {isAdmin && (
+                              <Tooltip label="Eliminar usuario">
+                                <IconButton
+                                  aria-label="Eliminar usuario"
+                                  icon={<DeleteIcon />}
+                                  size="sm"
+                                  variant="outline"
+                                  colorScheme="red"
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setToDelete(u); delDisc.onOpen() }}
+                                />
+                              </Tooltip>
+                            )}
+                          </HStack>
+                        </CardBody>
+                      </Card>
+                    )
+                  })}
                 </Stack>
 
                 {!loadingUsers && filtered.length === 0 && (
@@ -270,7 +287,7 @@ export default function Configuracion(){
         </ModalContent>
       </Modal>
 
-      {/* Delete user confirm */}
+      {/* Delete user confirm (admins only) */}
       <AlertDialog isOpen={delDisc.isOpen} onClose={delDisc.onClose} leastDestructiveRef={undefined}>
         <AlertDialogOverlay />
         <AlertDialogContent>
@@ -280,7 +297,7 @@ export default function Configuracion(){
           </AlertDialogBody>
           <AlertDialogFooter>
             <Button onClick={delDisc.onClose}>Cancelar</Button>
-            <Button colorScheme="red" ml={3} onClick={confirmDelete}>Eliminar</Button>
+            <Button colorScheme="red" ml={3} onClick={confirmDelete} isDisabled={!isAdmin}>Eliminar</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Box, Heading, Stack, Card, CardHeader, CardBody, HStack, Text, Badge,
   Button, Input, InputGroup, InputLeftElement, Select, Spacer, useColorModeValue, IconButton
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { Link } from 'react-router-dom'
 
@@ -17,22 +17,19 @@ function fold(v) {
 }
 
 export default function Pedidos() {
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
-  const fetchRef = useRef(authedFetch)
   const [rows, setRows] = useState([])
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
 
-  useEffect(() => { fetchRef.current = authedFetch }, [authedFetch])
 
   useEffect(() => {
     async function load() {
-      const res = await fetchRef.current('/pedidos')
-      const data = await res.json()
+      const data = await authedFetchJson('/pedidos')
       setRows(Array.isArray(data) ? data : [])
     }
     load()

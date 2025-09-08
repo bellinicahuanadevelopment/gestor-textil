@@ -66,6 +66,7 @@ export default function InventoryPickerModal({ isOpen, onClose, onAdd }) {
               <SearchIcon color="gray.400" />
             </InputLeftElement>
             <Input
+              variant="filled"
               placeholder="Buscar por descripción, referencia o color"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -106,7 +107,7 @@ export default function InventoryPickerModal({ isOpen, onClose, onAdd }) {
                             min={0}
                             max={max}
                             onChange={(_, n) => setQtyById(s => ({ ...s, [p.id]: isNaN(n) ? 0 : n }))}
-                            w="120px"
+                            w={{ base: 'full', sm: '32' }}
                           >
                             <NumberInputField />
                           </NumberInput>

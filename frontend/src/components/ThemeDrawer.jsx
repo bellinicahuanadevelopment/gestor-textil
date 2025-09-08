@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Drawer, DrawerOverlay, DrawerContent, DrawerHeader, DrawerBody,
   SimpleGrid, Box, Text, HStack, VStack, useColorMode, Switch, Divider,
-  IconButton
+  IconButton, useColorModeValue
 } from '@chakra-ui/react';
 import { useThemePrefs } from '../theme/ThemeContext';
 import { ACCENTS, FONT_OPTIONS } from '../theme/ThemeContext';
@@ -154,9 +154,8 @@ export default function ThemeDrawer({ isOpen, onClose }) {
                   aria-label="Disminuir tamaño"
                   onClick={dec}
                   variant="outline"
-                  bg="white"
-                  _dark={{ bg: 'gray.800' }}
-                  borderColor="gray.300"
+                  bg={useColorModeValue('white','gray.800')}
+                  borderColor={useColorModeValue('gray.300','whiteAlpha.300')}
                   rounded={prefs.radius}
                   size="sm"
                 >
@@ -164,15 +163,14 @@ export default function ThemeDrawer({ isOpen, onClose }) {
                 </IconButton>
                 <Text w="12" textAlign="center" fontWeight="semibold">{percent}%</Text>
                 <IconButton
-                  aria-label="Aumentar tamaño"
-                  onClick={inc}
-                  variant="outline"
-                  bg="white"
-                  _dark={{ bg: 'gray.800' }}
-                  borderColor="gray.300"
-                  rounded={prefs.radius}
-                  size="sm"
-                >
+                    aria-label="Aumentar tamaño"
+                    onClick={inc}
+                    variant="outline"
+                    bg={useColorModeValue('white','gray.800')}
+                    borderColor={useColorModeValue('gray.300','whiteAlpha.300')}
+                    rounded={prefs.radius}
+                    size="sm"
+                  >
                   +
                 </IconButton>
               </HStack>

@@ -6,9 +6,11 @@ import {
   useColorModeValue, useBreakpointValue
 } from '@chakra-ui/react'
 import { CheckIcon } from '@chakra-ui/icons'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import InventoryPickerModal from '../components/InventoryPickerModal'
+import ClientSelect from '../components/ClientSelect'
+
 
 function Stepper({ step, accent }) {
   const labels = ['Paso 1', 'Paso 2', 'Paso 3']
@@ -112,7 +114,7 @@ function Stepper({ step, accent }) {
 }
 
 export default function NuevoPedido() {
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
@@ -122,94 +124,104 @@ export default function NuevoPedido() {
   const [items, setItems] = useState([])
 
   const [form, setForm] = useState({
+    cliente_id: null,
     cliente_nombre: '',
     cliente_telefono: '',
     direccion_entrega: '',
     fecha_entrega: ''
   })
 
+
   const picker = useDisclosure()
 
   async function startOrder() {
+    // If an order already exists in this flow, do NOT create a new one.
+    if (pedidoId) {
+      setStep(2)
+      return
+    }
+
     try {
       const now = new Date()
       const fecha_local = now.toISOString().slice(0, 10)
       const hora_local = now.toTimeString().slice(0, 5)
-      const res = await authedFetch('/pedidos/start', {
+      const data = await authedFetchJson('/pedidos/start', {
         method: 'POST',
         body: JSON.stringify({ ...form, fecha_local, hora_local })
       })
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}))
-        throw new Error(e?.error || 'Error al crear pedido')
-      }
-      const data = await res.json()
-      setPedidoId(data.pedido_id)
+      setPedidoId(data?.pedido_id)
       setStep(2)
+      toast({ title: 'Pedido creado', status: 'success' })
     } catch (err) {
-      toast({ title: 'No se pudo iniciar el pedido', description: err.message, status: 'error' })
+      toast({ title: 'No se pudo crear el pedido', description: String(err?.message || err), status: 'error' })
     }
   }
 
+
+
+
   async function loadOrder() {
     if (!pedidoId) return
-    const res = await authedFetch(`/pedidos/${pedidoId}`)
-    const data = await res.json()
+    const data = await authedFetchJson(`/pedidos/${pedidoId}`)
     setItems(data.items || [])
   }
+
 
   useEffect(() => { loadOrder() }, [pedidoId])
 
   async function handleAddFromPicker(sel) {
     try {
-      const res = await authedFetch(`/pedidos/${pedidoId}/items`, {
+      await authedFetchJson(`/pedidos/${pedidoId}/items`, {
         method: 'POST',
         body: JSON.stringify({ producto_id: sel.producto_id, cantidad: sel.cantidad })
       })
-      const jj = await res.json()
-      if (!res.ok) throw new Error(jj?.error || 'Error al agregar')
-      picker.onClose()
       await loadOrder()
+      toast({ title: 'Ítem agregado', status: 'success' })
     } catch (err) {
-      toast({ title: 'No se pudo agregar', description: err.message, status: 'error' })
+      toast({ title: 'No se pudo agregar', description: String(err?.message || err), status: 'error' })
     }
   }
+
 
   async function updateItem(it, fields) {
-    const res = await authedFetch(`/pedidos/${pedidoId}/items/${it.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(fields)
-    })
-    const jj = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      toast({ title: 'No se pudo actualizar', description: jj?.error || 'Error', status: 'error' })
-    } else {
+    try {
+      await authedFetchJson(`/pedidos/${pedidoId}/items/${it.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(fields)
+      })
       await loadOrder()
+    } catch (err) {
+      toast({ title: 'No se pudo actualizar', description: String(err?.message || err), status: 'error' })
     }
   }
+
+
 
   async function removeItem(it) {
-    const res = await authedFetch(`/pedidos/${pedidoId}/items/${it.id}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const jj = await res.json().catch(() => ({}))
-      toast({ title: 'No se pudo eliminar', description: jj?.error || 'Error', status: 'error' })
-    } else {
+    try {
+      await authedFetchJson(`/pedidos/${pedidoId}/items/${it.id}`, { method: 'DELETE' })
       await loadOrder()
+      toast({ title: 'Ítem eliminado', status: 'success' })
+    } catch (err) {
+      toast({ title: 'No se pudo eliminar', description: String(err?.message || err), status: 'error' })
     }
   }
 
+
   async function submitOrder() {
-    const res = await authedFetch(`/pedidos/${pedidoId}/submit`, { method: 'POST' })
-    const jj = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      toast({ title: 'No se pudo enviar', description: jj?.error || 'Error', status: 'error' })
-    } else {
+    try {
+      await authedFetchJson(`/pedidos/${pedidoId}/submit`, { method: 'POST' })
       setStep(3)
+    } catch (err) {
+      toast({ title: 'No se pudo enviar', description: String(err?.message || err), status: 'error' })
     }
   }
 
   const step1Valid =
-    form.cliente_nombre && form.cliente_telefono && form.direccion_entrega && form.fecha_entrega
+    (form.cliente_id || form.cliente_nombre) &&
+    form.cliente_telefono &&
+    form.direccion_entrega &&
+    form.fecha_entrega
 
   return (
     <Box>
@@ -230,7 +242,7 @@ export default function NuevoPedido() {
             onClick={startOrder}
             isDisabled={!step1Valid}
           >
-            Siguiente
+            {pedidoId ? 'Continuar' : 'Siguiente'}
           </Button>
         )}
         {step === 2 && (
@@ -268,19 +280,31 @@ export default function NuevoPedido() {
         <Stack spacing="4" maxW="640px">
           <FormControl isRequired>
             <FormLabel>Nombre del cliente</FormLabel>
-            <Input value={form.cliente_nombre} onChange={e => setForm(f => ({ ...f, cliente_nombre: e.target.value }))} />
+            <ClientSelect
+              value={form.cliente_id ? { id: form.cliente_id, nombre: form.cliente_nombre, telefono: form.cliente_telefono, direccion_entrega: form.direccion_entrega } : null}
+              onChange={(c) => {
+                setForm(f => ({
+                  ...f,
+                  cliente_id: c?.id || null,
+                  cliente_nombre: c?.nombre || '',
+                  // Prefill phone/address if user hasn't typed anything yet
+                  cliente_telefono: f.cliente_telefono || c?.telefono || '',
+                  direccion_entrega: f.direccion_entrega || c?.direccion_entrega || c?.direccion || ''
+                }))
+              }}
+            />
           </FormControl>
           <FormControl isRequired>
             <FormLabel>Teléfono de contacto</FormLabel>
-            <Input value={form.cliente_telefono} onChange={e => setForm(f => ({ ...f, cliente_telefono: e.target.value }))} />
+            <Input variant="filled" value={form.cliente_telefono} onChange={e => setForm(f => ({ ...f, cliente_telefono: e.target.value }))} />
           </FormControl>
           <FormControl isRequired>
             <FormLabel>Dirección de entrega</FormLabel>
-            <Input value={form.direccion_entrega} onChange={e => setForm(f => ({ ...f, direccion_entrega: e.target.value }))} />
+            <Input variant="filled" value={form.direccion_entrega} onChange={e => setForm(f => ({ ...f, direccion_entrega: e.target.value }))} />
           </FormControl>
           <FormControl isRequired>
             <FormLabel>Fecha de entrega</FormLabel>
-            <Input type="date" value={form.fecha_entrega} onChange={e => setForm(f => ({ ...f, fecha_entrega: e.target.value }))} />
+            <Input variant="filled" type="date" value={form.fecha_entrega} onChange={e => setForm(f => ({ ...f, fecha_entrega: e.target.value }))} />
           </FormControl>
         </Stack>
       )}
@@ -302,7 +326,7 @@ export default function NuevoPedido() {
                   <CardHeader pb="2">
                     <HStack justify="space-between" align="start">
                       <Box>
-                        <Heading size="md">{it.descripcion}</Heading>
+                        <Heading size="lg">{it.descripcion}</Heading>
                         <Text fontSize="sm" color="gray.500">Ref: {it.referencia}</Text>
                       </Box>
                       <Box textAlign="right">
@@ -351,7 +375,7 @@ export default function NuevoPedido() {
 
       {step === 3 && (
         <VStack spacing="3" align="start">
-          <Heading size="md">Pedido enviado</Heading>
+          <Heading size="lg">Pedido enviado</Heading>
           <Text color="gray.600">Tu pedido ha sido registrado correctamente y queda en estado de revisión.</Text>
         </VStack>
       )}

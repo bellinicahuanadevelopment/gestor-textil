@@ -22,17 +22,16 @@ import {
   Spacer
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 
 export default function Inventario() {
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
   const titleColor = useColorModeValue(`${accent}.700`, `${accent}.300`)
   const stockColor = useColorModeValue(`${accent}.600`, `${accent}.300`)
 
-  const fetchRef = useRef(authedFetch)
   const mountedRef = useRef(false)
 
   const [rows, setRows] = useState(null)
@@ -43,9 +42,6 @@ export default function Inventario() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
 
-  useEffect(() => {
-    fetchRef.current = authedFetch
-  }, [authedFetch])
 
   useEffect(() => {
     mountedRef.current = true
@@ -54,10 +50,7 @@ export default function Inventario() {
         if (!mountedRef.current) return
         setLoading(true)
         setError(null)
-        const res = await fetchRef.current('/inventario/resumen')
-        if (!mountedRef.current) return
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
+        const data = await authedFetchJson('/inventario/resumen')
         if (!mountedRef.current) return
         setRows(Array.isArray(data) ? data : [])
       } catch (err) {

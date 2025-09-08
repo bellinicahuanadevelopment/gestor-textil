@@ -99,3 +99,29 @@ export function useAuthedFetch() {
 
   return { authedFetch, apiBase: base }
 }
+
+export function useAuthedFetchJson() {
+  const { authedFetch } = useAuthedFetch()
+  const { logout } = useAuth() // already available in this module’s scope
+
+  // Same call signature as fetch; returns parsed JSON or throws
+  return useCallback(
+    async (path, init = {}) => {
+      try {
+        const res = await authedFetch(path, init)
+        // If the server returns no body for 204s etc., guard the JSON parse
+        const text = await res.text()
+        if (!text) return null
+        return JSON.parse(text)
+      } catch (err) {
+        const msg = String(err?.message || err || '')
+        // Centralized session handling: if backend sent 401, drop session
+        if (msg.includes('HTTP 401')) {
+          try { logout() } catch {}
+        }
+        throw err
+      }
+    },
+    [authedFetch, logout]
+  )
+}

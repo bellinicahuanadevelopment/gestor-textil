@@ -5,51 +5,86 @@ const AuthCtx = createContext(null)
 const API_BASE = import.meta.env.VITE_API_URL
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(localStorage.getItem('auth_token') || '')
-  const [user, setUser] = useState(() => {
-    const raw = localStorage.getItem('auth_user')
-    return raw ? JSON.parse(raw) : null
-  })
-  const { setPrefsFromServer } = useThemePrefs()
+  // Boot from sessionStorage first (short-lived), then localStorage (persistent)
+  const initialToken =
+    (typeof window !== 'undefined' && sessionStorage.getItem('auth_token')) ||
+    (typeof window !== 'undefined' && localStorage.getItem('auth_token')) ||
+    ''
 
+  const initialUser = (() => {
+    if (typeof window === 'undefined') return null
+    const rawSession = sessionStorage.getItem('auth_user')
+    const rawLocal = localStorage.getItem('auth_user')
+    try {
+      return rawSession ? JSON.parse(rawSession) : (rawLocal ? JSON.parse(rawLocal) : null)
+    } catch {
+      return null
+    }
+  })()
+
+  const [token, setToken] = useState(initialToken)
+  const [user, setUser] = useState(initialUser)
+  const { setPrefsFromServer } = useThemePrefs()
   const isAuthenticated = !!token
 
+  // Persist changes to both storages according to where they currently live
   useEffect(() => {
-    if (token) {
-      localStorage.setItem('auth_token', token)
-    } else {
-      localStorage.removeItem('auth_token')
+    if (typeof window === 'undefined') return
+    // Clear both, then (re)write to the correct place (session if it was a session login)
+    sessionStorage.removeItem('auth_token')
+    sessionStorage.removeItem('auth_user')
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('auth_user')
+    if (token && user) {
+      // If the token originally came from sessionStorage, keep session scope; else persist
+      const cameFromSession =
+        !!(typeof window !== 'undefined' && sessionStorage.getItem('__session_mode') === '1')
+      const store = cameFromSession ? sessionStorage : localStorage
+      store.setItem('auth_token', token)
+      store.setItem('auth_user', JSON.stringify(user))
     }
-  }, [token])
+  }, [token, user])
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('auth_user', JSON.stringify(user))
-    } else {
-      localStorage.removeItem('auth_user')
-    }
-  }, [user])
-
-  async function login(email, password) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+  // Login now accepts options: { remember: boolean }
+  async function login(email, password, options = {}) {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({ email, password })
     })
     if (!res.ok) {
-      const data = await res.json().catch(()=>({}))
+      const data = await res.json().catch(() => ({}))
       throw new Error(data.error || 'Error al iniciar sesión')
     }
     const data = await res.json()
     setToken(data.token)
     setUser(data.user)
     setPrefsFromServer(data.prefs || {})
+
+    // Mark where we should persist this session (session vs. persistent)
+    if (typeof window !== 'undefined') {
+      const remember = !!options.remember
+      if (remember) {
+        localStorage.setItem('__session_mode', '0')
+      } else {
+        sessionStorage.setItem('__session_mode', '1')
+        localStorage.removeItem('__session_mode')
+      }
+    }
     return data
   }
 
   function logout() {
     setToken('')
     setUser(null)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('auth_token')
+      sessionStorage.removeItem('auth_user')
+      sessionStorage.removeItem('__session_mode')
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('auth_user')
+      localStorage.removeItem('__session_mode')
+    }
   }
 
   const value = useMemo(() => ({
@@ -58,6 +93,7 @@ export function AuthProvider({ children }) {
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }
+
 
 export function useAuth() {
   return useContext(AuthCtx)

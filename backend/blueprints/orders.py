@@ -106,6 +106,12 @@ def init_schema(engine=None):
         """))
 
         conn.execute(text("""
+            alter table if exists public.pedidos
+            add column if not exists cliente_id uuid references public.clientes(id)
+        """))
+
+
+        conn.execute(text("""
         create table if not exists public.pedido_items (
           id uuid primary key default gen_random_uuid(),
           pedido_id uuid not null references public.pedidos(id) on delete cascade,
@@ -117,6 +123,8 @@ def init_schema(engine=None):
           created_at timestamptz not null default now()
         )
         """))
+
+        
 
         # --- approval audit columns (idempotent) ---
         conn.execute(text("alter table public.pedidos add column if not exists approved_at timestamptz"))
@@ -229,6 +237,7 @@ def start_order():
         return jsonify({"error": "Unauthorized"}), 401
 
     b = request.get_json(force=True) or {}
+    cliente_id = b.get("cliente_id")
     nombre = (b.get("cliente_nombre") or "").strip()
     tel = (b.get("cliente_telefono") or "").strip()
     dir_envio = (b.get("direccion_entrega") or "").strip()
@@ -236,10 +245,32 @@ def start_order():
     fecha_local = b.get("fecha_local")
     hora_local = b.get("hora_local")
 
+    # If a client was selected, fill missing fields from clientes
+    if cliente_id and not nombre:
+        eng = get_engine()
+        with eng.begin() as conn:
+            row = conn.execute(
+                text("""
+                  select nombre, telefono, coalesce(direccion_entrega, direccion) as dir_ent
+                  from public.clientes where id = :cid
+                """),
+                {"cid": str(cliente_id)}
+            ).mappings().first()
+        if not row:
+            return jsonify({"error": "cliente_id inválido"}), 400
+        nombre = row["nombre"] or nombre
+        tel = tel or (row["telefono"] or "")
+        dir_envio = dir_envio or (row["dir_ent"] or "")
+
+
     errs = []
-    if not nombre: errs.append("cliente_nombre requerido")
-    if not tel: errs.append("cliente_telefono requerido")
-    if not dir_envio: errs.append("direccion_entrega requerida")
+    if not nombre:
+        errs.append("cliente_nombre requerido (o cliente_id)")
+    if not tel:
+        errs.append("cliente_telefono requerido")
+    if not dir_envio:
+        errs.append("direccion_entrega requerida")
+
     try:
         datetime.date.fromisoformat(str(fecha_entrega))
     except Exception:
@@ -259,12 +290,20 @@ def start_order():
         row = conn.execute(
             text("""
               insert into public.pedidos
-              (cliente_nombre, cliente_telefono, direccion_entrega, fecha_entrega, usuario_id, fecha_local, hora_local)
-              values (:n, :t, :d, :fe, :uid, coalesce(:fl, current_date), coalesce(:hl, current_time))
+              (cliente_id, cliente_nombre, cliente_telefono, direccion_entrega, fecha_entrega, usuario_id, fecha_local, hora_local)
+              values (:cid, :n, :t, :d, :fe, :uid, coalesce(:fl, current_date), coalesce(:hl, current_time))
               returning id
             """),
-            {"n": nombre, "t": tel, "d": dir_envio, "fe": fecha_entrega, "uid": user_id,
-             "fl": fecha_local, "hl": hora_local}
+            {
+              "cid": str(cliente_id) if cliente_id else None,
+              "n": nombre,
+              "t": tel,
+              "d": dir_envio,
+              "fe": fecha_entrega,
+              "uid": user_id,
+              "fl": fecha_local,
+              "hl": hora_local
+            }
         ).first()
     return jsonify({"pedido_id": row[0]}), 201
 

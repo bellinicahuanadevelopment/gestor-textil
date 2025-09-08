@@ -14,7 +14,7 @@ import {
 } from '@chakra-ui/icons'
 import { FiSave } from 'react-icons/fi'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -24,7 +24,7 @@ const fmtTime = (d)=> new Intl.DateTimeFormat('es-CO',{hour:'2-digit',minute:'2-
 export default function PedidoDetalle(){
   const { id } = useParams()
   const navigate = useNavigate()
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const { user } = useAuth()
   const accent = prefs?.accent || 'teal'
@@ -46,12 +46,18 @@ export default function PedidoDetalle(){
 
   async function load(){
     setLoading(true)
-    const res = await authedFetch(`/pedidos/${id}`)
-    const data = await res.json()
-    setHead(data.pedido || null)
-    setItems(Array.isArray(data.items) ? data.items : [])
-    setDirtyIds(new Set())
-    setLoading(false)
+    try {
+      const data = await authedFetchJson(`/pedidos/${id}`)
+      setHead(data?.pedido || null)
+      setItems(Array.isArray(data?.items) ? data.items : [])
+      setDirtyIds(new Set())
+    } catch (err) {
+      toast({ status: 'error', title: 'No se pudo cargar el pedido', description: String(err?.message || err) })
+      setHead(null)
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(()=>{ load() },[id])
 
@@ -65,24 +71,28 @@ export default function PedidoDetalle(){
 
   // removeItem
   async function removeItem(itemId){
-    const r = await authedFetch(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' })
-    if(!r.ok){ toast({status:'error', title:'No se pudo eliminar el ítem'}) ; return }
-    toast({status:'success', title:'Ítem eliminado'})
-    load()
+    try {
+      await authedFetchJson(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' })
+      toast({status:'success', title:'Ítem eliminado'})
+      load()
+    } catch (err) {
+      toast({status:'error', title:'No se pudo eliminar el ítem', description: String(err?.message || err)})
+    }
   }
 
   // confirm delete (from dialog)
   async function confirmDelete(){
     setDeleting(true)
-    const r = await authedFetch(`/pedidos/${id}`, { method:'DELETE' })
-    setDeleting(false)
-    if(!r.ok){
-      toast({status:'error', title:'No se pudo eliminar el pedido'})
-      return
+    try {
+      await authedFetchJson(`/pedidos/${id}`, { method:'DELETE' })
+      toast({status:'success', title:'Pedido eliminado'})
+      closeDelete()
+      navigate('/pedidos')
+    } catch (err) {
+      toast({status:'error', title:'No se pudo eliminar el pedido', description: String(err?.message || err)})
+    } finally {
+      setDeleting(false)
     }
-    toast({status:'success', title:'Pedido eliminado'})
-    closeDelete()
-    navigate('/pedidos')
   }
 
   // Save all edited items
@@ -96,11 +106,14 @@ export default function PedidoDetalle(){
 
     const failures = []
     for (const s of toSave) {
-      const r = await authedFetch(`/pedidos/${id}/items/${s.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(s.body)
-      })
-      if (!r.ok) failures.push(s.id)
+      try {
+        await authedFetchJson(`/pedidos/${id}/items/${s.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(s.body)
+        })
+      } catch {
+        failures.push(s.id)
+      }
     }
     setSaving(false)
 
@@ -120,9 +133,7 @@ export default function PedidoDetalle(){
     setHead(h => h ? { ...h, status: 'approved', approved_at: optimisticAt.toISOString() } : h)
     setApproving(true)
     try {
-      const r = await authedFetch(`/pedidos/${id}/approve`, { method:'POST' })
-      const data = await r.json().catch(()=> ({}))
-      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
+      const data = await authedFetchJson(`/pedidos/${id}/approve`, { method:'POST' })
       const newStatus = data?.pedido?.status || 'approved'
       const approvedAt = data?.pedido?.approved_at ? new Date(data.pedido.approved_at) : optimisticAt
       setHead(h => h ? { ...h, status: newStatus, approved_at: approvedAt.toISOString() } : h)
@@ -144,9 +155,7 @@ export default function PedidoDetalle(){
     if (!head || !isDraft(head.status)) return
     setSubmitting(true)
     try {
-      const r = await authedFetch(`/pedidos/${id}/submit`, { method:'POST' })
-      const data = await r.json().catch(()=> ({}))
-      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
+      await authedFetchJson(`/pedidos/${id}/submit`, { method:'POST' })
       setHead(h => h ? { ...h, status: 'submitted' } : h)
       toast({ status:'success', title:'Pedido enviado' })
     } catch (err) {
@@ -178,7 +187,7 @@ export default function PedidoDetalle(){
       {head && (
         <Text fontSize="sm" color={muted} mb="3">
           {head.cliente_nombre} • {head.direccion_entrega} • Entrega: {head.fecha_entrega}
-          <Badge ml="3" colorScheme="blue" textTransform="none">{head.status}</Badge>
+          <Badge ml="3" colorScheme={accent} textTransform="none">{head.status}</Badge>
         </Text>
       )}
 
@@ -201,7 +210,7 @@ export default function PedidoDetalle(){
               aria-label="Volver a pedidos"
               icon={<ArrowBackIcon />}
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => navigate('/pedidos')}
             />
           </Tooltip>
@@ -223,7 +232,7 @@ export default function PedidoDetalle(){
                 <IconButton
                   aria-label="Enviar pedido"
                   icon={<CheckIcon />}
-                  colorScheme="blue"
+                  colorScheme={accent}
                   onClick={handleSubmit}
                   isDisabled={submitting}
                   isLoading={submitting}
@@ -231,7 +240,7 @@ export default function PedidoDetalle(){
               ) : (
                 <Button
                   leftIcon={<CheckIcon />}
-                  colorScheme="blue"
+                  colorScheme={accent}
                   onClick={handleSubmit}
                   isDisabled={submitting}
                   isLoading={submitting}
@@ -297,18 +306,18 @@ export default function PedidoDetalle(){
           <Tooltip label={canEdit ? 'Eliminar pedido' : 'No se puede eliminar un pedido aprobado'}>
             {compact ? (
               <IconButton
-                aria-label="Eliminar pedido"
+                aria-label="Eliminar ítem"
                 icon={<DeleteIcon />}
-                colorScheme={accent}
-                variant="solid"
-                onClick={openDelete}
-                isDisabled={!canEdit || deleting}
-                isLoading={deleting}
+                size="sm"
+                variant="outline"
+                colorScheme="red"
+                onClick={()=>removeItem(it.id)}
+                isDisabled={!canEdit}
               />
             ) : (
               <Button
                 leftIcon={<DeleteIcon />}
-                colorScheme={accent}
+                colorScheme="red"
                 variant="solid"
                 onClick={openDelete}
                 isDisabled={!canEdit || deleting}
@@ -358,17 +367,17 @@ export default function PedidoDetalle(){
               <CardHeader pb="2">
                 <HStack justify="space-between" align="start">
                   <Box>
-                    <Heading size="lg" color={useColorModeValue(`${accent}.700`, `${accent}.200`)}>{it.descripcion}</Heading>
+                    <Heading size="lg" color={titleColor}>{it.descripcion}</Heading>
                     <Text fontSize="sm" color={muted}>Ref: {it.referencia}</Text>
                   </Box>
                   <IconButton
-                    aria-label="Eliminar ítem"
+                    aria-label="Eliminar pedido"
                     icon={<DeleteIcon />}
-                    size="sm"
-                    variant="outline"
                     colorScheme={accent}
-                    onClick={()=>removeItem(it.id)}
-                    isDisabled={!canEdit}
+                    variant="solid"
+                    onClick={openDelete}
+                    isDisabled={!canEdit || deleting}
+                    isLoading={deleting}
                   />
                 </HStack>
               </CardHeader>
@@ -386,7 +395,7 @@ export default function PedidoDetalle(){
                         setItems(prev=>prev.map(p=>p.id===it.id?{...p,cantidad:val}:p))
                         setDirtyIds(prev => new Set(prev).add(it.id))
                       }}
-                      maxW="140px"
+                      maxW={{ base: 'full', sm: '36' }}
                       isDisabled={!canEdit}
                     >
                       <NumberInputField />
@@ -408,7 +417,7 @@ export default function PedidoDetalle(){
                         setItems(prev=>prev.map(p=>p.id===it.id?{...p,precio:val}:p))
                         setDirtyIds(prev => new Set(prev).add(it.id))
                       }}
-                      maxW="180px"
+                      maxW={{ base: 'full', sm: '44' }}
                       isDisabled={!canEdit}
                     >
                       <NumberInputField />
@@ -515,7 +524,7 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
 
 /* Item picker modal */
 function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], lock=false }){
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
   const [rows,setRows] = useState([])
@@ -537,12 +546,15 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
 
   useEffect(()=>{
     async function load(){
-      const r = await authedFetch(`/inventario/resumen?pedido_id=${pedidoId}`)
-      const data = await r.json()
-      setRows(Array.isArray(data)?data:[])
+      try {
+        const data = await authedFetchJson(`/inventario/resumen?pedido_id=${pedidoId}`)
+        setRows(Array.isArray(data)?data:[])
+      } catch (err) {
+        setRows([])
+      }
     }
     if(isOpen) load()
-  },[isOpen, authedFetch, pedidoId])
+  },[isOpen, authedFetchJson, pedidoId])
 
   const fold = (v)=> (v??'').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()
   const filtered = useMemo(()=>{
@@ -566,8 +578,13 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
     if (cantidad > available) cantidad = available
 
     const body = { producto_id: prod.id, cantidad, precio: Number(prod.precio_lista||0) }
-    const r = await authedFetch(`/pedidos/${pedidoId}/items`, { method:'POST', body: JSON.stringify(body) })
-    if(r.ok){ onAdded(); onClose() }
+    try {
+      await authedFetchJson(`/pedidos/${pedidoId}/items`, { method:'POST', body: JSON.stringify(body) })
+      onAdded()
+      onClose()
+    } catch (err) {
+      // keep modal open; could add a toast here if desired
+    }
   }
 
   return (

@@ -7,6 +7,8 @@ import re
 from flask import Flask, request, jsonify, g, make_response
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
+
 from dotenv import load_dotenv
 import jwt
 
@@ -41,9 +43,18 @@ CORS_ALLOWED = _parse_cors(Config.CORS_ORIGINS)
 print("[CORS] Allowed origins:", CORS_ALLOWED)
 
 # Validate DATABASE_URL and mask password in logs
-db_url = app.config.get("DATABASE_URL") or os.getenv("DATABASE_URL", "")
+db_url = (
+    os.getenv("DATABASE_URL_POOLED")  # preferred: Supabase Pooler (transaction) URL
+    or app.config.get("DATABASE_URL")
+    or os.getenv("DATABASE_URL", "")
+)
 if not db_url:
     raise RuntimeError("DATABASE_URL is not defined. Check backend/.env")
+
+# If someone pasted a pooler host on 5432, force transaction port 6543
+if "pooler.supabase.com" in db_url and ":5432" in db_url:
+    db_url = db_url.replace(":5432", ":6543")
+
 
 def _mask(url: str) -> str:
     # Mask password in URL: postgresql+psycopg2://user:***@host:port/db
@@ -63,21 +74,31 @@ CORS(
 )
 
 # DB engine (SQLAlchemy Core)
-engine = create_engine(db_url, pool_pre_ping=True, future=True)
+engine = create_engine(
+    db_url,
+    pool_pre_ping=True,
+    future=True,
+    poolclass=NullPool  # let PgBouncer handle pooling
+)
 app.config["ENGINE"] = engine
 
 # ---- Blueprints (Inventory, Orders) ----
 from blueprints.inventory import bp as inventory_bp, init_schema as inventory_init_schema
 from blueprints.orders import bp as orders_bp, init_schema as orders_init_schema
+from blueprints.clients import bp as clients_bp, init_schema as clients_init_schema
 
-# Register under /api/v1
 app.register_blueprint(inventory_bp, url_prefix="/api/v1")
 with app.app_context():
     inventory_init_schema(engine)
 
+app.register_blueprint(clients_bp, url_prefix="/api/v1")
+with app.app_context():
+    clients_init_schema(engine)
+
 app.register_blueprint(orders_bp, url_prefix="/api/v1")
 with app.app_context():
     orders_init_schema(engine)
+
 
 # ---- Helpers (Auth) ----
 def create_token(user_id, email, profile):

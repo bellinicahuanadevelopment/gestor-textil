@@ -9,7 +9,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, SearchIcon } from '@chakra-ui/icons'
 import { useThemePrefs } from '../theme/ThemeContext'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 
 function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=false }) {
@@ -46,7 +46,7 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
 export default function Configuracion(){
   const { prefs } = useThemePrefs()
   const { user } = useAuth()
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
   const accent = prefs?.accent || 'teal'
   const toast = useToast()
 
@@ -74,9 +74,7 @@ export default function Configuracion(){
     if (!canManage) return
     setLoadingUsers(true)
     try {
-      const r = await authedFetch('/admin/users')
-      const data = await r.json()
-      if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`)
+      const data = await authedFetchJson('/admin/users')
       setUsers(Array.isArray(data) ? data : [])
     } catch(err){
       toast({ status:'error', title:'No se pudieron cargar los usuarios', description: String(err?.message || err) })
@@ -84,6 +82,7 @@ export default function Configuracion(){
       setLoadingUsers(false)
     }
   }
+
 
   // load when entering the Usuarios tab
   useEffect(() => { if (tabIndex === 1) loadUsers() }, [tabIndex]) // 0: General, 1: Usuarios
@@ -105,17 +104,15 @@ export default function Configuracion(){
 
   async function createUser(){
     try {
-      const r = await authedFetch('/admin/users', { method:'POST', body: JSON.stringify(form) })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`)
+      const data = await authedFetchJson('/admin/users', { method:'POST', body: JSON.stringify(form) })
       toast({ status:'success', title:'Usuario creado' })
-      setAdding(false)
-      setForm({ nombre_completo:'', email:'', password:'', profile:'viewer' })
-      loadUsers()
+      setForm({ nombre_completo:'', email:'', profile:'user', password:'' })
+      await loadUsers()
     } catch(err){
-      toast({ status:'error', title:'No se pudo crear', description: String(err?.message || err) })
+      toast({ status:'error', title:'No se pudo crear el usuario', description: String(err?.message || err) })
     }
   }
+
 
   // delete user dialog
   const [toDelete, setToDelete] = useState(null)
@@ -123,17 +120,16 @@ export default function Configuracion(){
   async function confirmDelete(){
     if (!toDelete) return
     try {
-      const r = await authedFetch(`/admin/users/${toDelete.id}`, { method:'DELETE' })
-      const data = await r.json().catch(()=> ({}))
-      if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`)
+      await authedFetchJson(`/admin/users/${toDelete.id}`, { method:'DELETE' })
       toast({ status:'success', title:'Usuario eliminado' })
       delDisc.onClose()
       setToDelete(null)
-      loadUsers()
+      await loadUsers()
     } catch(err){
       toast({ status:'error', title:'No se pudo eliminar', description: String(err?.message || err) })
     }
   }
+
 
   return (
     <Box>
@@ -256,15 +252,15 @@ export default function Configuracion(){
             <VStack spacing="3" align="stretch">
               <FormControl isRequired>
                 <FormLabel>Nombre completo</FormLabel>
-                <Input value={form.nombre_completo} onChange={e=>updateForm('nombre_completo', e.target.value)} />
+                <Input variant="filled" value={form.nombre_completo} onChange={e=>updateForm('nombre_completo', e.target.value)} />
               </FormControl>
               <FormControl isRequired>
                 <FormLabel>Email</FormLabel>
-                <Input type="email" value={form.email} onChange={e=>updateForm('email', e.target.value)} />
+                <Input variant="filled" type="email" value={form.email} onChange={e=>updateForm('email', e.target.value)} />
               </FormControl>
               <FormControl isRequired>
                 <FormLabel>Contraseña</FormLabel>
-                <Input type="password" value={form.password} onChange={e=>updateForm('password', e.target.value)} />
+                <Input variant="filled" type="password" value={form.password} onChange={e=>updateForm('password', e.target.value)} />
               </FormControl>
               <FormControl>
                 <FormLabel>Perfil</FormLabel>

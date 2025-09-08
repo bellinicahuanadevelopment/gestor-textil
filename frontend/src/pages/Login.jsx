@@ -8,6 +8,8 @@ import { ViewIcon, ViewOffIcon } from '@chakra-ui/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useThemePrefs } from '../theme/ThemeContext'
+import ApiDebugBadge from '../components/ApiDebugBadge'
+
 
 export default function Login() {
   const { login } = useAuth()
@@ -81,6 +83,7 @@ export default function Login() {
           <FormControl isRequired>
             <FormLabel>Email</FormLabel>
             <Input
+              variant="filled"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -94,6 +97,7 @@ export default function Login() {
             <FormLabel>Contraseña</FormLabel>
             <InputGroup>
               <Input
+                variant="filled"
                 type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -119,7 +123,7 @@ export default function Login() {
               Recuérdame
             </Checkbox>
             {/* You can wire this later */}
-            <Button variant="link" colorScheme={accent} size="sm">Forgot password</Button>
+            <Button variant="link" colorScheme={accent} size="sm">¿Olvidaste tu contraseña?</Button>
           </Box>
 
           <Button
@@ -127,9 +131,9 @@ export default function Login() {
             colorScheme={accent}
             height="12"
             isLoading={loading}
-            loadingText="Signing in…"
+            loadingText="Iniciando sesión…"
           >
-            Sign in
+            Iniciar sesión
           </Button>
 
           {/* Optional divider & secondary actions can go here */}
@@ -137,6 +141,7 @@ export default function Login() {
           <Text fontSize="sm" color={muted} textAlign="center">
             ¿No tienes cuenta? <Button variant="link" colorScheme={accent} size="sm">Registrarme</Button>
           </Text>
+          <ApiDebugBadge />
         </VStack>
       </Box>
     </Container>

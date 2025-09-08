@@ -4,8 +4,10 @@ import {
   Text,
   IconButton,
   Avatar,
-  HStack
+  HStack,
+  useColorModeValue
 } from '@chakra-ui/react'
+
 import { HamburgerIcon } from '@chakra-ui/icons'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -20,9 +22,8 @@ export default function Topbar({ onOpenSidebar }) {
       px="4"
       py="3"
       borderBottom="1px solid"
-      bg="white"
-      borderColor="blackAlpha.100"
-      _dark={{ bg: 'gray.800', borderColor: 'whiteAlpha.300' }}
+      bg={useColorModeValue('white','gray.800')}
+      borderColor={useColorModeValue('blackAlpha.200','whiteAlpha.300')}
       gap="3"
     >
       <HStack spacing="3">

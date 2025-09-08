@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Box, Heading, Stack, Card, CardHeader, CardBody, HStack, Text, Badge,
-  Button, Input, InputGroup, InputLeftElement, Select, Spacer, useColorModeValue, IconButton
+  Button, Input, InputGroup, InputLeftElement, Select, Spacer, useColorModeValue, IconButton,
+  Skeleton, SkeletonText
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { useAuthedFetchJson } from '../lib/api'
@@ -25,12 +26,17 @@ export default function Pedidos() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
-
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
-      const data = await authedFetchJson('/pedidos')
-      setRows(Array.isArray(data) ? data : [])
+      setLoading(true)
+      try {
+        const data = await authedFetchJson('/pedidos')
+        setRows(Array.isArray(data) ? data : [])
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
@@ -72,6 +78,8 @@ export default function Pedidos() {
   const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
   const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`) // ← accent title
 
+  const skeletonCards = Array.from({ length: pageSize })
+
   return (
     <Box>
       <HStack justify="space-between" align="center" mb="4">
@@ -80,7 +88,7 @@ export default function Pedidos() {
       </HStack>
 
       <HStack mb="4" align="center">
-        <InputGroup maxW="560px">
+        <InputGroup maxW="500px">
           <InputLeftElement pointerEvents="none">
             <SearchIcon color="gray.400" />
           </InputLeftElement>
@@ -90,7 +98,6 @@ export default function Pedidos() {
             onChange={e => setQuery(e.target.value)}
             variant="filled"
             bg={inputBg}
-            borderColor={inputBorder}
             _hover={{ bg: inputBg }}
             _focus={{ bg: inputBg, borderColor: inputBorder }}
           />
@@ -112,48 +119,74 @@ export default function Pedidos() {
       </HStack>
 
       <Stack spacing="4">
-        {pageRows.map(p => (
-          <Card
-            key={p.id}
-            as={Link}
-            to={`/pedidos/${p.id}`}
-            variant="outline"
-            cursor="pointer"
-            _hover={{ borderColor: `${accent}.300` }}
-            _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
-          >
-            <CardHeader pb="2">
-              <HStack justify="space-between" align="start">
-                <Box>
-                  <Heading size="lg" color={titleColor}>{p.cliente_nombre}</Heading>
-                  <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
-                </Box>
-                <Badge colorScheme={statusColor(p.status)} textTransform="none">{p.status}</Badge>
-              </HStack>
-            </CardHeader>
-            <CardBody pt="2">
-              <HStack justify="space-between" wrap="wrap">
-                <Text fontSize="sm" color="gray.600">Entrega: {p.fecha_entrega}</Text>
-                <HStack>
-                  <Text fontSize="sm" color="gray.500">Ítems:</Text>
-                  <Text fontWeight="semibold">{p.items_count}</Text>
-                  <Text fontSize="sm" color="gray.500" ml="4">Total:</Text>
-                  <Text fontWeight="semibold">{money(p.total)}</Text>
+        {loading ? (
+          skeletonCards.map((_, i) => (
+            <Card key={`s-${i}`} variant="outline">
+              <CardHeader pb="2">
+                <HStack justify="space-between" align="start">
+                  <Box w="full">
+                    <Skeleton height="28px" maxW="240px" />
+                    <SkeletonText mt="2" noOfLines={1} maxW="300px" />
+                  </Box>
+                  <Skeleton height="22px" width="80px" />
                 </HStack>
-              </HStack>
-            </CardBody>
-          </Card>
-        ))}
-        {pageRows.length === 0 && (
-          <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
-            {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
-          </Box>
+              </CardHeader>
+              <CardBody pt="2">
+                <HStack justify="space-between" wrap="wrap">
+                  <SkeletonText noOfLines={1} maxW="200px" />
+                  <HStack>
+                    <SkeletonText noOfLines={1} maxW="220px" />
+                  </HStack>
+                </HStack>
+              </CardBody>
+            </Card>
+          ))
+        ) : (
+          <>
+            {pageRows.map(p => (
+              <Card
+                key={p.id}
+                as={Link}
+                to={`/pedidos/${p.id}`}
+                variant="outline"
+                cursor="pointer"
+                _hover={{ borderColor: `${accent}.300` }}
+                _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
+              >
+                <CardHeader pb="2">
+                  <HStack justify="space-between" align="start">
+                    <Box>
+                      <Heading size="lg" color={titleColor}>{p.cliente_nombre}</Heading>
+                      <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
+                    </Box>
+                    <Badge colorScheme={statusColor(p.status)} textTransform="none">{p.status}</Badge>
+                  </HStack>
+                </CardHeader>
+                <CardBody pt="2">
+                  <HStack justify="space-between" wrap="wrap">
+                    <Text fontSize="sm" color="gray.600">Entrega: {p.fecha_entrega}</Text>
+                    <HStack>
+                      <Text fontSize="sm" color="gray.500">Ítems:</Text>
+                      <Text fontWeight="semibold">{p.items_count}</Text>
+                      <Text fontSize="sm" color="gray.500" ml="4">Total:</Text>
+                      <Text fontWeight="semibold">{money(p.total)}</Text>
+                    </HStack>
+                  </HStack>
+                </CardBody>
+              </Card>
+            ))}
+            {pageRows.length === 0 && (
+              <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
+                {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
+              </Box>
+            )}
+          </>
         )}
       </Stack>
 
       <HStack mt="6" justify="space-between" align="center" flexWrap="wrap" gap="3">
         <Text fontSize="sm" color="gray.600">
-          {total === 0 ? '0' : `${start + 1}–${end}`} de {total}
+          {loading ? 'Cargando…' : (total === 0 ? '0' : `${start + 1}–${end}`) + ` de ${total}`}
         </Text>
         <HStack>
           <IconButton
@@ -161,19 +194,19 @@ export default function Pedidos() {
             size="sm"
             icon={<ChevronLeftIcon />}
             onClick={() => setPage(p => Math.max(1, p - 1))}
-            isDisabled={safePage <= 1}
+            isDisabled={loading || safePage <= 1}
             variant="outline"
             colorScheme={accent}
           />
           <Text fontSize="sm" minW="90px" textAlign="center">
-            Página {safePage} de {totalPages}
+            {loading ? '—' : `Página ${safePage} de ${totalPages}`}
           </Text>
           <IconButton
             aria-label="Siguiente"
             size="sm"
             icon={<ChevronRightIcon />}
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            isDisabled={safePage >= totalPages}
+            isDisabled={loading || safePage >= totalPages}
             variant="outline"
             colorScheme={accent}
           />

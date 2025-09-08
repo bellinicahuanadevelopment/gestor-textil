@@ -2,17 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Tabs, TabList, TabPanels, TabPanel, Tab,
   Badge, useColorModeValue, Button, IconButton, Input, InputGroup, InputLeftElement,
-  Select, Table, Thead, Tbody, Tr, Th, Td, Tooltip, useToast, Modal, ModalOverlay,
+  Select, Tooltip, useToast, Modal, ModalOverlay,
   ModalContent, ModalHeader, ModalBody, ModalFooter, FormControl, FormLabel,
   AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader,
-  AlertDialogBody, AlertDialogFooter, useDisclosure, Spacer
+  AlertDialogBody, AlertDialogFooter, useDisclosure, Spacer,
+  Card, CardHeader, CardBody, useBreakpointValue
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, SearchIcon } from '@chakra-ui/icons'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuthedFetchJson } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 
-function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=false }) {
+function AccentTab({ label, underline, disabled=false }) {
   return (
     <Tab
       isDisabled={disabled}
@@ -26,19 +27,7 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
       borderColor="transparent"
       _selected={{ color: underline, borderColor: underline }}
     >
-      <HStack spacing="2">
-        <Text>{label}</Text>
-        <Badge
-          rounded="full"
-          px="2"
-          bg={pillBg}
-          color={pillColor}
-          borderWidth="1px"
-          borderColor={useColorModeValue('blackAlpha.200','whiteAlpha.300')}
-        >
-          {count}
-        </Badge>
-      </HStack>
+      <Text>{label}</Text>
     </Tab>
   )
 }
@@ -54,8 +43,6 @@ export default function Configuracion(){
 
   // look & feel
   const underline = useColorModeValue(`${accent}.500`, `${accent}.300`)
-  const pillBg = useColorModeValue(`${accent}.50`, `${accent}.900`)
-  const pillColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
   const muted = useColorModeValue('gray.600','gray.400')
   const barBg = useColorModeValue('white','gray.800')
   const barBorder = useColorModeValue('blackAlpha.200','whiteAlpha.300')
@@ -82,7 +69,6 @@ export default function Configuracion(){
       setLoadingUsers(false)
     }
   }
-
 
   // load when entering the Usuarios tab
   useEffect(() => { if (tabIndex === 1) loadUsers() }, [tabIndex]) // 0: General, 1: Usuarios
@@ -113,7 +99,6 @@ export default function Configuracion(){
     }
   }
 
-
   // delete user dialog
   const [toDelete, setToDelete] = useState(null)
   const delDisc = useDisclosure()
@@ -130,6 +115,7 @@ export default function Configuracion(){
     }
   }
 
+  const compact = useBreakpointValue({ base: true, md: false })
 
   return (
     <Box>
@@ -149,9 +135,9 @@ export default function Configuracion(){
           pb="2"
           mb="3"
         >
-          <AccentTab label="General" count={0} underline={underline} pillBg={pillBg} pillColor={pillColor} />
+          <AccentTab label="General" underline={underline} />
           {canManage && (
-            <AccentTab label="Usuarios" count={users.length} underline={underline} pillBg={pillBg} pillColor={pillColor} />
+            <AccentTab label="Usuarios" underline={underline} />
           )}
         </TabList>
 
@@ -178,59 +164,63 @@ export default function Configuracion(){
                       onChange={(e)=>setQuery(e.target.value)}
                       variant="filled"
                       bg={inputBg}
-                      borderColor={inputBorder}
                       _hover={{ bg: inputBg }}
                       _focus={{ bg: inputBg, borderColor: inputBorder }}
                     />
                   </InputGroup>
                   <Spacer />
-                  <Button colorScheme={accent} leftIcon={<AddIcon />} onClick={()=>setAdding(true)}>
-                    Agregar usuario
-                  </Button>
+                  {compact ? (
+                    <IconButton
+                      aria-label="Agregar usuario"
+                      icon={<AddIcon />}
+                      colorScheme={accent}
+                      onClick={()=>setAdding(true)}
+                    />
+                  ) : (
+                    <Button colorScheme={accent} leftIcon={<AddIcon />} onClick={()=>setAdding(true)}>
+                      Agregar usuario
+                    </Button>
+                  )}
                 </HStack>
 
-                <Box overflowX="auto">
-                  <Table size="sm" variant="simple">
-                    <Thead>
-                      <Tr>
-                        <Th>Nombre</Th>
-                        <Th>Email</Th>
-                        <Th>Perfil</Th>
-                        <Th>Creado</Th>
-                        <Th isNumeric>Acciones</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {filtered.map(u => (
-                        <Tr key={u.id}>
-                          <Td>{u.nombre_completo}</Td>
-                          <Td>{u.email}</Td>
-                          <Td>
-                            <Badge colorScheme={
-                              u.profile === 'admin' ? 'purple' :
-                              u.profile === 'manager' ? 'blue' : 'gray'
-                            } textTransform="none">
-                              {u.profile}
-                            </Badge>
-                          </Td>
-                          <Td>{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</Td>
-                          <Td isNumeric>
-                            <Tooltip label="Eliminar usuario">
-                              <IconButton
-                                aria-label="Eliminar usuario"
-                                icon={<DeleteIcon />}
-                                size="sm"
-                                variant="outline"
-                                colorScheme="red"
-                                onClick={() => { setToDelete(u); delDisc.onOpen() }}
-                              />
-                            </Tooltip>
-                          </Td>
-                        </Tr>
-                      ))}
-                    </Tbody>
-                  </Table>
-                </Box>
+                {/* Users as independent cards */}
+                <Stack spacing="3">
+                  {filtered.map(u => (
+                    <Card key={u.id} variant="outline">
+                      <CardHeader pb="2">
+                        <HStack align="start" justify="space-between">
+                          <Box>
+                            <Heading size="md">{u.nombre_completo}</Heading>
+                            <Text fontSize="sm" color="gray.500">{u.email}</Text>
+                          </Box>
+                          <Badge colorScheme={
+                            u.profile === 'admin' ? 'purple' :
+                            u.profile === 'manager' ? 'blue' : 'gray'
+                          } textTransform="none">
+                            {u.profile}
+                          </Badge>
+                        </HStack>
+                      </CardHeader>
+                      <CardBody pt="2">
+                        <HStack justify="space-between" align="center" wrap="wrap" gap="3">
+                          <Text fontSize="sm" color="gray.600">
+                            Creado: {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
+                          </Text>
+                          <Tooltip label="Eliminar usuario">
+                            <IconButton
+                              aria-label="Eliminar usuario"
+                              icon={<DeleteIcon />}
+                              size="sm"
+                              variant="outline"
+                              colorScheme="red"
+                              onClick={() => { setToDelete(u); delDisc.onOpen() }}
+                            />
+                          </Tooltip>
+                        </HStack>
+                      </CardBody>
+                    </Card>
+                  ))}
+                </Stack>
 
                 {!loadingUsers && filtered.length === 0 && (
                   <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color={muted} mt="4">

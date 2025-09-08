@@ -11,6 +11,7 @@ import {
   HStack,
   Grid,
   Skeleton,
+  SkeletonText,
   Divider,
   useColorModeValue,
   Input,
@@ -31,6 +32,8 @@ export default function Inventario() {
   const accent = prefs?.accent || 'teal'
   const titleColor = useColorModeValue(`${accent}.700`, `${accent}.300`)
   const stockColor = useColorModeValue(`${accent}.600`, `${accent}.300`)
+  const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
 
   const mountedRef = useRef(false)
 
@@ -41,7 +44,6 @@ export default function Inventario() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
-
 
   useEffect(() => {
     mountedRef.current = true
@@ -93,13 +95,41 @@ export default function Inventario() {
   const endIdx = Math.min(startIdx + pageSize, total)
   const pageRows = filtered.slice(startIdx, endIdx)
 
+  const skeletonCards = Array.from({ length: pageSize })
+
   const content = useMemo(() => {
     if (loading) {
       return (
         <Stack spacing="4">
-          <Skeleton height="120px" />
-          <Skeleton height="120px" />
-          <Skeleton height="120px" />
+          {skeletonCards.map((_, i) => (
+            <Card key={`s-${i}`} variant="outline" w="full">
+              <CardHeader pb="2">
+                <HStack justify="space-between" align="start">
+                  <Box w="full">
+                    <Skeleton height="28px" maxW="280px" />
+                    <SkeletonText mt="2" noOfLines={1} maxW="200px" />
+                  </Box>
+                  <Box textAlign="right" minW="5rem">
+                    <Skeleton height="28px" width="48px" />
+                    <SkeletonText mt="1" noOfLines={1} maxW="60px" />
+                  </Box>
+                </HStack>
+              </CardHeader>
+              <CardBody pt="2">
+                <Stack spacing="2">
+                  <SkeletonText noOfLines={1} maxW="140px" />
+                  <SkeletonText noOfLines={2} />
+                  <Divider />
+                </Stack>
+              </CardBody>
+              <CardFooter pt="0">
+                <Stack w="full" spacing="1" align="flex-end">
+                  <SkeletonText noOfLines={1} maxW="120px" />
+                  <Skeleton height="18px" width="100px" />
+                </Stack>
+              </CardFooter>
+            </Card>
+          ))}
         </Stack>
       )
     }
@@ -151,14 +181,14 @@ export default function Inventario() {
         })}
       </Stack>
     )
-  }, [loading, error, pageRows, titleColor, stockColor])
+  }, [loading, error, pageRows, pageSize, titleColor, stockColor])
 
   return (
     <Box>
       <Heading size="lg" mb="4">Inventario</Heading>
 
       <HStack mb="4" spacing="3" align="center">
-        <InputGroup maxW="520px" flex="1">
+        <InputGroup maxW="500px" flex="1">
           <InputLeftElement pointerEvents="none">
             <SearchIcon color="gray.400" />
           </InputLeftElement>
@@ -166,6 +196,10 @@ export default function Inventario() {
             placeholder="Buscar por descripción, referencia o color"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            variant="filled"
+            bg={inputBg}
+            _hover={{ bg: inputBg }}
+            _focus={{ bg: inputBg, borderColor: inputBorder }}
           />
         </InputGroup>
 
@@ -188,9 +222,9 @@ export default function Inventario() {
 
       {content}
 
-      <HStack mt="4" justify="space-between">
+      <HStack mt="4" justify="space-between" flexWrap="wrap" gap="3">
         <Text fontSize="sm" color="gray.600">
-          Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
+          {loading ? 'Cargando…' : `Mostrando ${total === 0 ? 0 : startIdx + 1}–${endIdx} de ${total}`}
         </Text>
         <HStack>
           <IconButton
@@ -198,17 +232,21 @@ export default function Inventario() {
             size="sm"
             icon={<ChevronLeftIcon />}
             onClick={() => setPage(p => Math.max(1, p - 1))}
-            isDisabled={pageSafe <= 1}
+            isDisabled={loading || pageSafe <= 1}
             variant="outline"
+            colorScheme={accent}
           />
-          <Text fontSize="sm">Página {pageSafe} de {lastPage}</Text>
+          <Text fontSize="sm">{
+            loading ? '—' : `Página ${pageSafe} de ${lastPage}`
+          }</Text>
           <IconButton
             aria-label="Siguiente"
             size="sm"
             icon={<ChevronRightIcon />}
             onClick={() => setPage(p => Math.min(lastPage, p + 1))}
-            isDisabled={pageSafe >= lastPage}
+            isDisabled={loading || pageSafe >= lastPage}
             variant="outline"
+            colorScheme={accent}
           />
         </HStack>
       </HStack>

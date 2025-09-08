@@ -168,7 +168,7 @@ def approve_order(pedido_id):
 
     # Allow flexible status labels unless explicitly set
     candidates = [os.environ.get("APPROVED_STATUS") or "approved", "aprobado", "Aprobado", "APPROVED", "APROBADO"]
-
+    approved_labels = {c.lower() for c in candidates if c}
     try:
       with engine.begin() as conn:
         # Ensure order exists & not already approved
@@ -178,6 +178,9 @@ def approve_order(pedido_id):
         ).mappings().first()
         if not head:
             return jsonify({"ok": False, "message": "Pedido no encontrado"}), 404
+        
+        if str(head.get("status")).lower() in approved_labels:
+            return jsonify({"ok": False, "message": "Pedido ya aprobado"}), 409
 
         # Try to set status + audit fields
         row = None

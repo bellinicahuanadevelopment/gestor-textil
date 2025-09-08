@@ -106,7 +106,7 @@ export default function Configuracion(){
     try {
       const data = await authedFetchJson('/admin/users', { method:'POST', body: JSON.stringify(form) })
       toast({ status:'success', title:'Usuario creado' })
-      setForm({ nombre_completo:'', email:'', profile:'user', password:'' })
+      setForm({ nombre_completo:'', email:'', password:'', profile:'viewer' })
       await loadUsers()
     } catch(err){
       toast({ status:'error', title:'No se pudo crear el usuario', description: String(err?.message || err) })

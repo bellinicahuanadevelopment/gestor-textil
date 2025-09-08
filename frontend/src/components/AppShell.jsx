@@ -39,8 +39,9 @@ export default function AppShell({ children }) {
         <Sidebar
           collapsed={sidebarCollapsed}
           onToggleCollapse={toggleSidebarCollapse}
-          onOpenTheme={themeDisc.onOpen}
+          onOpenTheme={() => { mobileSidebar.onClose(); themeDisc.onOpen(); }}
         />
+
       </Box>
 
       {/* Content column */}
@@ -78,8 +79,11 @@ export default function AppShell({ children }) {
             collapsed={false}
             onToggleCollapse={() => {}}
             isInDrawer={true}
-            onOpenTheme={themeDisc.onOpen}
+            onOpenTheme={() => { mobileSidebar.onClose(); themeDisc.onOpen(); }}
+            onNavigate={mobileSidebar.onClose}
           />
+
+
         </DrawerContent>
       </Drawer>
     </Flex>

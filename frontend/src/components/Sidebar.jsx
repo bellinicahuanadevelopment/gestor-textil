@@ -92,7 +92,7 @@ function NavItem({ icon, children, to, isActive, onClick, rightIcon, showIconsOn
 
   if (to) {
     return (
-      <ChakraLink as={Link} to={to} _hover={{ textDecoration: 'none' }}>
+      <ChakraLink as={Link} to={to} _hover={{ textDecoration: 'none' }} onClick={onClick}>
         {wrapped}
       </ChakraLink>
     )
@@ -100,7 +100,7 @@ function NavItem({ icon, children, to, isActive, onClick, rightIcon, showIconsOn
   return wrapped
 }
 
-export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpenTheme }) {
+export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpenTheme, onNavigate }) {
   const { pathname } = useLocation()
   const [accountOpen, setAccountOpen] = useState(false)
   const [pendingOpenAccount, setPendingOpenAccount] = useState(false)
@@ -207,6 +207,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
             to="/"
             isActive={pathname === '/'}
             showIconsOnly={showIconsOnly}
+            onClick={isInDrawer ? onNavigate : undefined}
             accent={accent}
           >
             Inicio
@@ -217,20 +218,24 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
             to="/inventario"
             isActive={pathname === '/inventario'}
             showIconsOnly={showIconsOnly}
+            onClick={isInDrawer ? onNavigate : undefined}
             accent={accent}
           >
             Inventario
           </NavItem>
+
 
           <NavItem
             icon={FiShoppingCart}
             to="/pedidos"
             isActive={pathname === '/pedidos'}
             showIconsOnly={showIconsOnly}
+            onClick={isInDrawer ? onNavigate : undefined}
             accent={accent}
           >
             Pedidos
           </NavItem>
+
 
           <NavItem
             icon={FiPlusCircle}
@@ -242,15 +247,18 @@ export default function Sidebar({ collapsed, onToggleCollapse, isInDrawer, onOpe
             Nuevo pedido
           </NavItem>
 
+
           <NavItem
             icon={SettingsIcon}
             to="/configuracion"
             isActive={pathname === '/configuracion'}
             showIconsOnly={showIconsOnly}
+            onClick={isInDrawer ? onNavigate : undefined}
             accent={accent}
           >
             Configuración
           </NavItem>
+
         </VStack>
       </VStack>
 

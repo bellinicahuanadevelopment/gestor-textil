@@ -22,11 +22,24 @@ export default function ThemeDrawer({ isOpen, onClose }) {
   const percent = Math.round((prefs.uiScale || 1) * 100);
 
   return (
-    <Drawer isOpen={isOpen} placement="right" onClose={onClose} size="sm">
+    <Drawer
+      isOpen={isOpen}
+      placement="right"
+      onClose={onClose}
+      size={{ base: 'xs', md: 'sm' }}
+      closeOnOverlayClick={true}
+      returnFocusOnClose={false}
+    >
       <DrawerOverlay />
-      <DrawerContent>
+      <DrawerContent
+        w={{ base: '85vw', md: 'sm' }}
+        maxW={{ base: '85vw', md: 'sm' }}
+        h="100dvh"
+        maxH="100dvh"
+        borderLeftWidth="1px"
+      >
         <DrawerHeader display="flex" alignItems="center" justifyContent="space-between">
-          <Text>Theme Panel</Text>
+          <Text>Temas</Text>
           <HStack>
             <Text fontSize="sm" color="gray.500">Oscuro</Text>
             <Switch
@@ -39,10 +52,10 @@ export default function ThemeDrawer({ isOpen, onClose }) {
           </HStack>
         </DrawerHeader>
 
-        <DrawerBody>
+        <DrawerBody overflowY="auto" pb="6">
           <VStack align="stretch" spacing={6}>
             <Box>
-              <Text mb={3} fontSize="sm" color="gray.500">Color Palette</Text>
+              <Text mb={3} fontSize="sm" color="gray.500">Paleta de Colores</Text>
               <SimpleGrid columns={6} spacing={3}>
                 {ACCENTS.map(c => (
                   <Box
@@ -65,7 +78,7 @@ export default function ThemeDrawer({ isOpen, onClose }) {
             <Divider />
 
             <Box>
-              <Text mb={3} fontSize="sm" color="gray.500">Font Family</Text>
+              <Text mb={3} fontSize="sm" color="gray.500">Tipo de Letra</Text>
               <SimpleGrid columns={4} spacing={3}>
                 {FONT_OPTIONS.map(f => {
                   const selected = prefs.font === f.id;
@@ -99,7 +112,7 @@ export default function ThemeDrawer({ isOpen, onClose }) {
             <Divider />
 
             <Box>
-              <Text mb={3} fontSize="sm" color="gray.500">Radius</Text>
+              <Text mb={3} fontSize="sm" color="gray.500">Curva</Text>
               <SimpleGrid columns={6} spacing={3}>
                 {['none','xs','sm','md','lg','xl','2xl'].map(r => {
                   const selected = prefs.radius === r;
@@ -148,7 +161,7 @@ export default function ThemeDrawer({ isOpen, onClose }) {
 
             {/* UI Size stepper */}
             <Box>
-              <Text mb={3} fontSize="sm" color="gray.500">UI Size</Text>
+              <Text mb={3} fontSize="sm" color="gray.500">Tamaño</Text>
               <HStack>
                 <IconButton
                   aria-label="Disminuir tamaño"
@@ -163,14 +176,14 @@ export default function ThemeDrawer({ isOpen, onClose }) {
                 </IconButton>
                 <Text w="12" textAlign="center" fontWeight="semibold">{percent}%</Text>
                 <IconButton
-                    aria-label="Aumentar tamaño"
-                    onClick={inc}
-                    variant="outline"
-                    bg={useColorModeValue('white','gray.800')}
-                    borderColor={useColorModeValue('gray.300','whiteAlpha.300')}
-                    rounded={prefs.radius}
-                    size="sm"
-                  >
+                  aria-label="Aumentar tamaño"
+                  onClick={inc}
+                  variant="outline"
+                  bg={useColorModeValue('white','gray.800')}
+                  borderColor={useColorModeValue('gray.300','whiteAlpha.300')}
+                  rounded={prefs.radius}
+                  size="sm"
+                >
                   +
                 </IconButton>
               </HStack>

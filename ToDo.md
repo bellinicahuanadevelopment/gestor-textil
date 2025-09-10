@@ -1,0 +1,11 @@
+- [x] Fix Sidebar not showing complete in mobile environment
+- [x] Approval timestamp
+- [ ] Add, Liberado status after approved. This is the one that will make the inventory movement.
+- [x] Hide/disable “Agregar ítem” & inputs when `head.status === 'approved'`.
+- [x] Optimistic UI on approve (you already update `head.status`; we can gray out controls).
+- [x] Toasts: success with `approved_at` time.
+- [x] Hide Approbar entirely for non-managers (you’re disabling; we can fully hide).
+- [x] Add a “Enviar” (submit) button to move `draft → submitted` for regular users.
+- [ ] Logística de entrada y salida
+- [x] cada movimiento de inventario debe tener un número de referencia
+- [x] mostrar número de referncia de los pedidos

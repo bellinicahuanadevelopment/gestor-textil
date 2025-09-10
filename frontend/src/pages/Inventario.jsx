@@ -11,7 +11,6 @@ import {
   HStack,
   Grid,
   Skeleton,
-  SkeletonText,
   Divider,
   useColorModeValue,
   Input,
@@ -20,9 +19,13 @@ import {
   Select,
   IconButton,
   Badge,
-  Spacer
+  Spacer,
+  FormControl,
+  FormLabel,
+  usePrefersReducedMotion
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { Link } from 'react-router-dom'
 import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 
@@ -30,10 +33,18 @@ export default function Inventario() {
   const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
-  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.300`)
-  const stockColor = useColorModeValue(`${accent}.600`, `${accent}.300`)
+
+  // Keep brand color reserved mainly for CTAs; use neutral for headings/content
+  const headingColor = useColorModeValue('gray.800', 'gray.100')
+  const numberColor = useColorModeValue('gray.900', 'gray.100')
   const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
   const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
+  const barBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
+  const panelBg = useColorModeValue('transparent', 'transparent')
+  const muted = useColorModeValue('gray.600', 'gray.400')
+
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const transition = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
 
   const mountedRef = useRef(false)
 
@@ -57,7 +68,7 @@ export default function Inventario() {
         setRows(Array.isArray(data) ? data : [])
       } catch (err) {
         if (!mountedRef.current) return
-        setError(err?.message || 'Error loading inventory')
+        setError(err?.message || 'Error al cargar el inventario')
         setRows([])
       } finally {
         if (mountedRef.current) setLoading(false)
@@ -95,46 +106,18 @@ export default function Inventario() {
   const endIdx = Math.min(startIdx + pageSize, total)
   const pageRows = filtered.slice(startIdx, endIdx)
 
-  const skeletonCards = Array.from({ length: pageSize })
-
   const content = useMemo(() => {
     if (loading) {
       return (
-        <Stack spacing="4">
-          {skeletonCards.map((_, i) => (
-            <Card key={`s-${i}`} variant="outline" w="full">
-              <CardHeader pb="2">
-                <HStack justify="space-between" align="start">
-                  <Box w="full">
-                    <Skeleton height="28px" maxW="280px" />
-                    <SkeletonText mt="2" noOfLines={1} maxW="200px" />
-                  </Box>
-                  <Box textAlign="right" minW="5rem">
-                    <Skeleton height="28px" width="48px" />
-                    <SkeletonText mt="1" noOfLines={1} maxW="60px" />
-                  </Box>
-                </HStack>
-              </CardHeader>
-              <CardBody pt="2">
-                <Stack spacing="2">
-                  <SkeletonText noOfLines={1} maxW="140px" />
-                  <SkeletonText noOfLines={2} />
-                  <Divider />
-                </Stack>
-              </CardBody>
-              <CardFooter pt="0">
-                <Stack w="full" spacing="1" align="flex-end">
-                  <SkeletonText noOfLines={1} maxW="120px" />
-                  <Skeleton height="18px" width="100px" />
-                </Stack>
-              </CardFooter>
-            </Card>
-          ))}
+        <Stack spacing="4" aria-busy="true" aria-live="polite">
+          <Skeleton height="120px" />
+          <Skeleton height="120px" />
+          <Skeleton height="120px" />
         </Stack>
       )
     }
     if (error) {
-      return <Text color="red.400" fontSize="sm">Error: {error}</Text>
+      return <Text color="red.400" fontSize="sm" role="alert">Error: {error}</Text>
     }
     if (!pageRows || pageRows.length === 0) {
       return <Text color="gray.500">No hay resultados.</Text>
@@ -144,15 +127,32 @@ export default function Inventario() {
         {pageRows.map((p) => {
           const disponible = Number((p.cantidad_disponible ?? p.cantidad_actual) || 0)
           return (
-            <Card key={p.id} variant="outline" w="full">
+            <Card
+              key={p.id}
+              variant="outline"
+              w="full"
+              _hover={{ borderColor: `${accent}.300` }}
+              sx={{ transition }}
+            >
               <CardHeader pb="2">
                 <Grid templateColumns="1fr auto" alignItems="start" gap="3">
                   <Box>
-                    <Heading size="lg" color={titleColor}>{p.descripcion}</Heading>
-                    <Text mt="1" fontSize="sm" color="gray.500">Ref: {p.referencia}</Text>
+                    <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
+                      {p.descripcion}
+                    </Heading>
+                    <Text mt="1" fontSize="sm" color="gray.500" noOfLines={2} maxW="ch.75">
+                      Ref: {p.referencia}
+                    </Text>
                   </Box>
                   <Box textAlign="right" minW="5rem">
-                    <Text fontSize="2xl" fontWeight="bold" lineHeight="1" color={stockColor}>
+                    <Text
+                      fontSize="2xl"
+                      fontWeight="bold"
+                      lineHeight="1.15"
+                      color={numberColor}
+                      fontFamily="mono"
+                      sx={{ fontVariantNumeric: 'tabular-nums' }}
+                    >
                       {disponible}
                     </Text>
                     <Text fontSize="xs" color="gray.500">disponible</Text>
@@ -173,7 +173,14 @@ export default function Inventario() {
               <CardFooter pt="0">
                 <Stack w="full" spacing="0" align="flex-end">
                   <Text fontSize="xs" color="gray.500">Precio de lista</Text>
-                  <Text fontWeight="semibold">{formatMoney(p.precio_lista)}</Text>
+                  <Text
+                    fontWeight="semibold"
+                    fontFamily="mono"
+                    sx={{ fontVariantNumeric: 'tabular-nums' }}
+                    textAlign="right"
+                  >
+                    {formatMoney(p.precio_lista)}
+                  </Text>
                 </Stack>
               </CardFooter>
             </Card>
@@ -181,50 +188,85 @@ export default function Inventario() {
         })}
       </Stack>
     )
-  }, [loading, error, pageRows, pageSize, titleColor, stockColor])
+  }, [loading, error, pageRows, accent, headingColor, numberColor, transition])
 
   return (
-    <Box>
-      <Heading size="lg" mb="4">Inventario</Heading>
+    <Box as="main">
+      {/* Top bar: Title + Primary Action */}
+      <HStack justify="space-between" align="center" mb="4">
+        <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
+          Inventario
+        </Heading>
 
-      <HStack mb="4" spacing="3" align="center">
-        <InputGroup maxW="500px" flex="1">
-          <InputLeftElement pointerEvents="none">
-            <SearchIcon color="gray.400" />
-          </InputLeftElement>
-          <Input
-            placeholder="Buscar por descripción, referencia o color"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            variant="filled"
-            bg={inputBg}
-            _hover={{ bg: inputBg }}
-            _focus={{ bg: inputBg, borderColor: inputBorder }}
-          />
-        </InputGroup>
+        {/* Primary action: clear, unmistakable CTA */}
+        <IconButton
+          as={Link}
+          to="/inventario/movimientos/nuevo"
+          aria-label="Registrar movimiento de inventario"
+          colorScheme={accent}
+          icon={<ChevronRightIcon />} // visually distinct; swap to a custom icon if you have one
+          variant="solid"
+        />
+      </HStack>
+
+      {/* Controls row with visible labels */}
+      <HStack mb="4" spacing="3" align="end" wrap="wrap">
+        <FormControl maxW="520px" flex="1">
+          <FormLabel mb="1" fontSize="sm" color={muted}>Buscar</FormLabel>
+          <InputGroup>
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="gray.400" aria-hidden="true" />
+            </InputLeftElement>
+            <Input
+              aria-label="Buscar por descripción, referencia o color"
+              placeholder="Descripción, referencia o color"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              variant="filled"
+              bg={inputBg}
+              _hover={{ bg: inputBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
+              lineHeight="1.45"
+            />
+          </InputGroup>
+        </FormControl>
 
         <Spacer />
 
-        <HStack>
-          <Text fontSize="sm" color="gray.500">Mostrar</Text>
+        <FormControl w="auto">
+          <FormLabel mb="1" fontSize="sm" color={muted}>Mostrar</FormLabel>
           <Select
             size="sm"
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            width="70px"
+            width="84px"
+            aria-label="Cantidad de productos por página"
           >
             <option value={5}>5</option>
             <option value={10}>10</option>
             <option value={15}>15</option>
           </Select>
-        </HStack>
+        </FormControl>
       </HStack>
 
-      {content}
+      <Box
+        borderRadius="md"
+        border="1px solid"
+        borderColor={barBorder}
+        bg={panelBg}
+        p={{ base: 2, md: 3 }}
+      >
+        {content}
+      </Box>
 
-      <HStack mt="4" justify="space-between" flexWrap="wrap" gap="3">
-        <Text fontSize="sm" color="gray.600">
-          {loading ? 'Cargando…' : `Mostrando ${total === 0 ? 0 : startIdx + 1}–${endIdx} de ${total}`}
+      <HStack mt="4" justify="space-between" align="center" wrap="wrap" gap="3">
+        <Text
+          fontSize="sm"
+          color={muted}
+          role="status"
+          aria-live="polite"
+        >
+          Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
         </Text>
         <HStack>
           <IconButton
@@ -232,19 +274,19 @@ export default function Inventario() {
             size="sm"
             icon={<ChevronLeftIcon />}
             onClick={() => setPage(p => Math.max(1, p - 1))}
-            isDisabled={loading || pageSafe <= 1}
+            isDisabled={pageSafe <= 1}
             variant="outline"
             colorScheme={accent}
           />
-          <Text fontSize="sm">{
-            loading ? '—' : `Página ${pageSafe} de ${lastPage}`
-          }</Text>
+          <Text fontSize="sm" minW="90px" textAlign="center">
+            Página {pageSafe} de {lastPage}
+          </Text>
           <IconButton
             aria-label="Siguiente"
             size="sm"
             icon={<ChevronRightIcon />}
             onClick={() => setPage(p => Math.min(lastPage, p + 1))}
-            isDisabled={loading || pageSafe >= lastPage}
+            isDisabled={pageSafe >= lastPage}
             variant="outline"
             colorScheme={accent}
           />

@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useThemePrefs } from '../theme/ThemeContext'
+import { queryClient } from '../lib/queryClient'
+
 
 const AuthCtx = createContext(null)
 const API_BASE = import.meta.env.VITE_API_URL
@@ -75,17 +77,30 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    // Reset in-memory auth state first so UI reacts immediately
     setToken('')
     setUser(null)
+
+    // Clear persisted state in both storages (handles either session/local mode)
     if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('auth_token')
-      sessionStorage.removeItem('auth_user')
-      sessionStorage.removeItem('__session_mode')
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('auth_user')
-      localStorage.removeItem('__session_mode')
+      try {
+        sessionStorage.removeItem('auth_token')
+        sessionStorage.removeItem('auth_user')
+        sessionStorage.removeItem('__session_mode')
+      } catch {}
+      try {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
+        localStorage.removeItem('__session_mode')
+      } catch {}
     }
+
+    // Purge all cached queries/mutations to avoid data leakage across sessions
+    try {
+      queryClient.clear()
+    } catch {}
   }
+
 
   const value = useMemo(() => ({
     token, user, isAuthenticated, login, logout

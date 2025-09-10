@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   Box, Heading, Stack, Card, CardHeader, CardBody, HStack, Text, Badge,
-  Button, Input, InputGroup, InputLeftElement, Select, Spacer, useColorModeValue, IconButton,
-  Skeleton, SkeletonText, useBreakpointValue, FormControl, FormLabel, usePrefersReducedMotion
+  Button, Input, InputGroup, InputLeftElement, Select, Spacer,
+  useColorModeValue, IconButton, Skeleton, SkeletonText,
+  useBreakpointValue, FormControl, FormLabel, usePrefersReducedMotion
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon, AddIcon } from '@chakra-ui/icons'
-import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { Link } from 'react-router-dom'
+import { useOrdersQuery } from '../lib/hooks/useOrdersQuery'
 
 function fold(v) {
   return (v ?? '')
@@ -31,11 +32,9 @@ function money(n) {
 }
 
 export default function Pedidos() {
-  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
-  // Neutral ink for content; reserve brand color for CTAs/focus
   const headingColor = useColorModeValue('gray.800', 'gray.100')
   const muted = useColorModeValue('gray.600', 'gray.400')
   const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
@@ -46,31 +45,13 @@ export default function Pedidos() {
   const prefersReducedMotion = usePrefersReducedMotion()
   const transition = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
 
-  const [rows, setRows] = useState([])
+  const { data: rows = [], isLoading, isError, error } = useOrdersQuery()
+
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
 
   const compact = useBreakpointValue({ base: true, md: false })
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const data = await authedFetchJson('/pedidos')
-        setRows(Array.isArray(data) ? data : [])
-      } catch (err) {
-        setRows([])
-        setError(err?.message || 'Error al cargar pedidos')
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
 
   const filtered = useMemo(() => {
     const q = fold(query)
@@ -90,8 +71,6 @@ export default function Pedidos() {
   const end = Math.min(start + pageSize, total)
   const pageRows = filtered.slice(start, end)
 
-  useEffect(() => { setPage(1) }, [query, pageSize])
-
   function statusColor(s) {
     if (s === 'draft') return 'gray'
     if (s === 'submitted') return 'blue'
@@ -104,7 +83,6 @@ export default function Pedidos() {
 
   return (
     <Box as="main">
-      {/* Top: Title + Primary Action (single, unmistakable) */}
       <HStack justify="space-between" align="center" mb="4">
         <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
           Pedidos
@@ -132,7 +110,6 @@ export default function Pedidos() {
         )}
       </HStack>
 
-      {/* Controls: visible labels, consistent spacing */}
       <HStack mb="4" spacing="3" align="end" wrap="wrap">
         <FormControl maxW="520px" flex="1">
           <FormLabel mb="1" fontSize="sm" color={muted}>Buscar</FormLabel>
@@ -144,7 +121,7 @@ export default function Pedidos() {
               aria-label="Buscar por cliente, dirección, estado o referencia"
               placeholder="Cliente, dirección, estado o referencia"
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => { setQuery(e.target.value); setPage(1) }}
               variant="filled"
               bg={inputBg}
               _hover={{ bg: inputBg }}
@@ -160,7 +137,7 @@ export default function Pedidos() {
           <FormLabel mb="1" fontSize="sm" color={muted}>Mostrar</FormLabel>
           <Select
             value={pageSize}
-            onChange={e => setPageSize(Number(e.target.value))}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
             size="sm"
             w="84px"
             aria-label="Cantidad de pedidos por página"
@@ -174,7 +151,7 @@ export default function Pedidos() {
 
       <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
         <Stack spacing="4">
-          {loading ? (
+          {isLoading ? (
             skeletonCards.map((_, i) => (
               <Card key={`s-${i}`} variant="outline" aria-busy="true" aria-live="polite">
                 <CardHeader pb="2">
@@ -196,9 +173,9 @@ export default function Pedidos() {
                 </CardBody>
               </Card>
             ))
-          ) : error ? (
+          ) : isError ? (
             <Box role="alert">
-              <Text color="red.400" fontSize="sm">Error: {error}</Text>
+              <Text color="red.400" fontSize="sm">Error: {error?.message || 'Error al cargar pedidos'}</Text>
             </Box>
           ) : (
             <>
@@ -265,7 +242,7 @@ export default function Pedidos() {
 
       <HStack mt="6" justify="space-between" align="center" flexWrap="wrap" gap="3">
         <Text fontSize="sm" color={muted} role="status" aria-live="polite">
-          {loading ? 'Cargando…' : (total === 0 ? '0' : `${start + 1}–${end}`) + ` de ${total}`}
+          {isLoading ? 'Cargando…' : (total === 0 ? '0' : `${start + 1}–${end}`) + ` de ${total}`}
         </Text>
         <HStack>
           <IconButton
@@ -273,19 +250,19 @@ export default function Pedidos() {
             size="sm"
             icon={<ChevronLeftIcon />}
             onClick={() => setPage(p => Math.max(1, p - 1))}
-            isDisabled={loading || safePage <= 1}
+            isDisabled={isLoading || safePage <= 1}
             variant="outline"
             colorScheme={accent}
           />
           <Text fontSize="sm" minW="90px" textAlign="center">
-            {loading ? '—' : `Página ${safePage} de ${totalPages}`}
+            {isLoading ? '—' : `Página ${safePage} de ${totalPages}`}
           </Text>
           <IconButton
             aria-label="Siguiente"
             size="sm"
             icon={<ChevronRightIcon />}
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            isDisabled={loading || safePage >= totalPages}
+            isDisabled={isLoading || safePage >= totalPages}
             variant="outline"
             colorScheme={accent}
           />
@@ -293,4 +270,12 @@ export default function Pedidos() {
       </HStack>
     </Box>
   )
+}
+
+function statusColor(s) {
+  if (s === 'draft') return 'gray'
+  if (s === 'submitted') return 'blue'
+  if (s === 'approved') return 'green'
+  if (s === 'cancelled') return 'red'
+  return 'gray'
 }

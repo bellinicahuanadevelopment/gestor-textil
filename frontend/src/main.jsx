@@ -4,16 +4,19 @@ import { ChakraProvider, ColorModeScript } from '@chakra-ui/react'
 import App from './App'
 import { ThemePrefsProvider, useThemePrefs } from './theme/ThemeContext'
 import { AuthProvider } from './contexts/AuthContext'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './lib/queryClient'
 
 function ThemedApp() {
   const { theme, colorModeConfigScript } = useThemePrefs()
   return (
     <>
-      {/* Mantiene el modo (claro/oscuro) entre recargas */}
       <ColorModeScript initialColorMode={colorModeConfigScript} />
       <ChakraProvider theme={theme}>
         <AuthProvider>
-          <App />
+          <QueryClientProvider client={queryClient}>
+            <App />
+          </QueryClientProvider>
         </AuthProvider>
       </ChakraProvider>
     </>

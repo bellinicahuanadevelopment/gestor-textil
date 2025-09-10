@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, useColorModeValue, Button, IconButton,
   Input, Select, FormControl, FormLabel, useToast, AlertDialog, AlertDialogOverlay,
@@ -11,6 +11,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuthedFetchJson } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 export default function UsuarioDetalle(){
   const { id } = useParams()
@@ -30,68 +31,68 @@ export default function UsuarioDetalle(){
 
   const compact = useBreakpointValue({ base: true, md: false })
 
+  const queryClient = useQueryClient()
+
+  // Load user (prefer single-resource endpoint)
+  const {
+    data: userData,
+    isLoading,
+    isFetching,
+    isError
+  } = useQuery({
+    queryKey: ['admin','user', id],
+    queryFn: () => authedFetchJson(`/admin/users/${id}`),
+    enabled: !!id,
+    retry: 1,
+    onError: () => {
+      toast({ status:'warning', title:'Usuario no encontrado' })
+      navigate('/configuracion', { replace: true })
+    }
+  })
+
+  // Local editable form state, hydrated once data arrives
   const [form, setForm] = useState({ nombre_completo:'', email:'', profile:'viewer' })
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  useEffect(() => {
+    if (userData) {
+      setForm({
+        nombre_completo: userData.nombre_completo || '',
+        email: userData.email || '',
+        profile: userData.profile || 'viewer'
+      })
+    }
+  }, [userData])
 
   function updateForm(k, v){ setForm(prev => ({ ...prev, [k]: v })) }
 
-  async function load(){
-    setLoading(true)
-    try {
-      const list = await authedFetchJson('/admin/users')
-      const data = Array.isArray(list) ? list.find(u => u.id === id) : null
-      if (data) {
-        setForm({
-          nombre_completo: data.nombre_completo || '',
-          email: data.email || '',
-          profile: data.profile || 'viewer'
-        })
-      } else {
-        toast({ status:'warning', title:'Usuario no encontrado' })
-        navigate('/configuracion', { replace: true })
-      }
-    } catch(err){
-      toast({
-        status:'error',
-        title:'No se pudo cargar el usuario',
-        description: String(err?.message || err)
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(()=>{ load() },[id])
-
-  async function save(){
-    setSaving(true)
-    try{
-      await authedFetchJson(`/admin/users/${id}`, { method:'PUT', body: JSON.stringify(form) })
+  const saveUser = useMutation({
+    mutationFn: (body) => authedFetchJson(`/admin/users/${id}`, {
+      method:'PUT',
+      body: JSON.stringify(body)
+    }),
+    onSuccess: (updated) => {
+      // Optimistically update this user and invalidate the list
+      queryClient.setQueryData(['admin','user', id], (old) => ({ ...(old || {}), ...(updated || body) }))
+      queryClient.invalidateQueries({ queryKey: ['admin','users'] })
       toast({ status:'success', title:'Cambios guardados' })
-    }catch(err){
+    },
+    onError: (err) => {
       toast({ status:'error', title:'No se pudo guardar', description: String(err?.message || err) })
-    }finally{
-      setSaving(false)
     }
-  }
+  })
 
-  // delete dialog
   const delDisc = useDisclosure()
-  async function confirmDelete(){
-    setDeleting(true)
-    try {
-      await authedFetchJson(`/admin/users/${id}`, { method:'DELETE' })
+  const deleteUser = useMutation({
+    mutationFn: () => authedFetchJson(`/admin/users/${id}`, { method:'DELETE' }),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['admin','user', id] })
+      queryClient.invalidateQueries({ queryKey: ['admin','users'] })
       toast({ status:'success', title:'Usuario eliminado' })
       navigate('/configuracion', { replace: true })
-    } catch(err){
+    },
+    onError: (err) => {
       toast({ status:'error', title:'No se pudo eliminar', description: String(err?.message || err) })
-    } finally {
-      setDeleting(false)
-      delDisc.onClose()
     }
-  }
+  })
 
   return (
     <Box>
@@ -117,12 +118,19 @@ export default function UsuarioDetalle(){
                 aria-label="Guardar"
                 icon={<FiSave />}
                 colorScheme={accent}
-                onClick={save}
-                isLoading={saving}
+                onClick={() => saveUser.mutate(form)}
+                isLoading={saveUser.isPending}
+                isDisabled={isLoading || isFetching}
               />
             </Tooltip>
           ) : (
-            <Button leftIcon={<FiSave />} colorScheme={accent} onClick={save} isLoading={saving}>
+            <Button
+              leftIcon={<FiSave />}
+              colorScheme={accent}
+              onClick={() => saveUser.mutate(form)}
+              isLoading={saveUser.isPending}
+              isDisabled={isLoading || isFetching}
+            >
               Guardar
             </Button>
           )}
@@ -135,8 +143,8 @@ export default function UsuarioDetalle(){
                 colorScheme="red"
                 variant="outline"
                 onClick={delDisc.onOpen}
-                isDisabled={!isAdmin}
-                isLoading={deleting}
+                isDisabled={!isAdmin || isLoading || isFetching}
+                isLoading={deleteUser.isPending}
               />
             ) : (
               <Button
@@ -144,8 +152,8 @@ export default function UsuarioDetalle(){
                 colorScheme="red"
                 variant="outline"
                 onClick={delDisc.onOpen}
-                isDisabled={!isAdmin}
-                isLoading={deleting}
+                isDisabled={!isAdmin || isLoading || isFetching}
+                isLoading={deleteUser.isPending}
               >
                 Eliminar
               </Button>
@@ -165,6 +173,7 @@ export default function UsuarioDetalle(){
               bg={inputBg}
               _hover={{ bg: inputBg }}
               _focus={{ bg: inputBg, borderColor: inputBorder }}
+              isDisabled={isLoading || isFetching || saveUser.isPending}
             />
           </FormControl>
           <FormControl isRequired>
@@ -177,6 +186,7 @@ export default function UsuarioDetalle(){
               bg={inputBg}
               _hover={{ bg: inputBg }}
               _focus={{ bg: inputBg, borderColor: inputBorder }}
+              isDisabled={isLoading || isFetching || saveUser.isPending}
             />
           </FormControl>
           <FormControl>
@@ -184,6 +194,7 @@ export default function UsuarioDetalle(){
             <Select
               value={form.profile}
               onChange={e=>updateForm('profile', e.target.value)}
+              isDisabled={isLoading || isFetching || saveUser.isPending}
             >
               <option value="viewer">Observador</option>
               <option value="seller">Vendedor</option>
@@ -194,7 +205,6 @@ export default function UsuarioDetalle(){
         </VStack>
       </Box>
 
-      {/* Delete confirm */}
       <AlertDialog isOpen={delDisc.isOpen} onClose={delDisc.onClose} leastDestructiveRef={undefined}>
         <AlertDialogOverlay />
         <AlertDialogContent>
@@ -204,7 +214,13 @@ export default function UsuarioDetalle(){
           </AlertDialogBody>
           <AlertDialogFooter>
             <Button onClick={delDisc.onClose}>Cancelar</Button>
-            <Button colorScheme="red" ml={3} onClick={confirmDelete} isLoading={deleting} isDisabled={!isAdmin}>
+            <Button
+              colorScheme="red"
+              ml={3}
+              onClick={() => deleteUser.mutate()}
+              isLoading={deleteUser.isPending}
+              isDisabled={!isAdmin}
+            >
               Eliminar
             </Button>
           </AlertDialogFooter>

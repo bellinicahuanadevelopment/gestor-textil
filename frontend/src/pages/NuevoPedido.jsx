@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import React, { useRef, useState, Suspense, lazy, useEffect } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Input, Button,
   FormControl, FormLabel, Card, CardHeader, CardBody,
@@ -13,6 +13,8 @@ import {
 } from '@chakra-ui/icons'
 import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+
 // Lazy-load heavy modal for performance
 const InventoryPickerModal = lazy(() => import('../components/InventoryPickerModal'))
 import ClientSelect from '../components/ClientSelect'
@@ -91,7 +93,6 @@ function Stepper({ step, accent }) {
                 {isDone ? <CheckIcon boxSize="3.5" aria-hidden="true" /> : index}
               </Box>
 
-              {/* Hide text on very narrow screens to avoid overlap */}
               <Text
                 fontSize={labelSize}
                 fontWeight={isActive ? 'semibold' : 'medium'}
@@ -116,6 +117,7 @@ function Stepper({ step, accent }) {
 
 export default function NuevoPedido() {
   const authedFetchJson = useAuthedFetchJson()
+  const queryClient = useQueryClient()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
@@ -123,15 +125,7 @@ export default function NuevoPedido() {
   const [step, setStep] = useState(1)
   const [pedidoId, setPedidoId] = useState(null)
 
-  const [items, setItems] = useState([])
-  const [itemsLoading, setItemsLoading] = useState(false)
-
-  const [flashId, setFlashId] = useState(null)
-  const [creating, setCreating] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-
-  // destructive action confirmation (remove item)
-  const [removeTarget, setRemoveTarget] = useState(null)
+  const [flashId, setFlashId] = useState(null) // can be item.id or producto_id
 
   const headingRef = useRef(null)
   const prefersReducedMotion = usePrefersReducedMotion()
@@ -148,130 +142,140 @@ export default function NuevoPedido() {
   const compact = useBreakpointValue({ base: true, md: false })
   const picker = useDisclosure()
 
-  // Focus the main heading on step change for context
   useEffect(() => {
     if (headingRef.current) headingRef.current.focus()
   }, [step])
 
-  async function startOrder() {
-    if (pedidoId) {
-      setStep(2)
-      return
-    }
-    try {
-      setCreating(true)
+  // -------- Query: order details (items, etc.) --------
+  const {
+    data: order,
+    isLoading: isOrderLoading,
+    isFetching: isOrderFetching,
+    isError: isOrderError,
+    error: orderError
+  } = useQuery({
+    queryKey: ['pedido', pedidoId],
+    queryFn: () => authedFetchJson(`/pedidos/${pedidoId}`),
+    enabled: !!pedidoId,
+    placeholderData: (prev) => prev
+  })
+
+  const items = order?.items || []
+
+  // Helper to optimistically adjust a single item in cache
+  function patchItemInCache(itemId, patch) {
+    queryClient.setQueryData(['pedido', pedidoId], (old) => {
+      if (!old || !Array.isArray(old.items)) return old
+      return {
+        ...old,
+        items: old.items.map(row => row.id === itemId ? { ...row, ...patch } : row)
+      }
+    })
+  }
+
+  // -------- Mutations --------
+  const startOrder = useMutation({
+    mutationFn: async () => {
       const now = new Date()
       const fecha_local = now.toISOString().slice(0, 10)
       const hora_local = now.toTimeString().slice(0, 5)
-      const data = await authedFetchJson('/pedidos/start', {
+      return authedFetchJson('/pedidos/start', {
         method: 'POST',
         body: JSON.stringify({ ...form, fecha_local, hora_local })
       })
+    },
+    onSuccess: (data) => {
       setPedidoId(data?.pedido_id)
       setStep(2)
       toast({ title: 'Pedido creado', status: 'success' })
-    } catch (err) {
+    },
+    onError: (err) => {
       toast({ title: 'No se pudo crear el pedido', description: String(err?.message || err), status: 'error' })
-    } finally {
-      setCreating(false)
     }
-  }
+  })
 
-  async function loadOrder() {
-    if (!pedidoId) return
-    setItemsLoading(true)
-    try {
-      const data = await authedFetchJson(`/pedidos/${pedidoId}`)
-      setItems(data.items || [])
-    } finally {
-      setItemsLoading(false)
-    }
-  }
-
-  useEffect(() => { loadOrder() }, [pedidoId])
-
-  async function handleAddFromPicker(sel) {
-    const prevItems = Array.isArray(items) ? items.slice() : []
-    try {
-      await authedFetchJson(`/pedidos/${pedidoId}/items`, {
+  const addItem = useMutation({
+    mutationFn: async ({ producto_id, referencia, cantidad }) => {
+      return authedFetchJson(`/pedidos/${pedidoId}/items`, {
         method: 'POST',
         body: JSON.stringify({
-          producto_id: sel.producto_id,
-          referencia: sel.referencia,
-          cantidad: Number(sel.cantidad || 0),
+          producto_id,
+          referencia,
+          cantidad: Number(cantidad || 0)
         })
       })
-
-      const fresh = await authedFetchJson(`/pedidos/${pedidoId}`)
-      const newItems = fresh.items || []
-      setItems(newItems)
-
-      const afterRow = newItems.find(r => r.producto_id === sel.producto_id)
-      if (afterRow) {
-        setFlashId(afterRow.id)
-        setTimeout(() => setFlashId(null), 1000)
-      }
-
-      const prevRow  = prevItems.find(r => r.producto_id === sel.producto_id)
-      if (prevRow && afterRow) {
-        const prevQty  = Number(prevRow.cantidad) || 0
-        const addQty   = Number(sel.cantidad) || 0
-        const afterQty = Number(afterRow.cantidad) || 0
-        const expected = prevQty + addQty
-        if (afterQty !== expected && addQty > 0) {
-          await authedFetchJson(`/pedidos/${pedidoId}/items/${afterRow.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ cantidad: expected })
-          })
-          const fresh2 = await authedFetchJson(`/pedidos/${pedidoId}`)
-          setItems(fresh2.items || [])
-          setFlashId(afterRow.id)
-          setTimeout(() => setFlashId(null), 1000)
-        }
-      }
-
+    },
+    onSuccess: async (_res, vars) => {
+      setFlashId(vars.producto_id)
+      await queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
+      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
       toast({ title: 'Ítem agregado', status: 'success' })
-    } catch (err) {
+    },
+    onError: (err) => {
       toast({ title: 'No se pudo agregar', description: String(err?.message || err), status: 'error' })
     }
-  }
+  })
 
-  async function updateItem(it, fields) {
-    try {
-      await authedFetchJson(`/pedidos/${pedidoId}/items/${it.id}`, {
+  const updateItem = useMutation({
+    mutationFn: async ({ itemId, fields }) => {
+      return authedFetchJson(`/pedidos/${pedidoId}/items/${itemId}`, {
         method: 'PUT',
         body: JSON.stringify(fields)
       })
-      await loadOrder()
-    } catch (err) {
+    },
+    onMutate: async ({ itemId, fields }) => {
+      await queryClient.cancelQueries({ queryKey: ['pedido', pedidoId] })
+      const previous = queryClient.getQueryData(['pedido', pedidoId])
+      patchItemInCache(itemId, fields)
+      return { previous }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', pedidoId], ctx.previous)
       toast({ title: 'No se pudo actualizar', description: String(err?.message || err), status: 'error' })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
     }
-  }
+  })
 
-  async function removeItemConfirmed() {
-    if (!removeTarget) return
-    try {
-      await authedFetchJson(`/pedidos/${pedidoId}/items/${removeTarget.id}`, { method: 'DELETE' })
-      await loadOrder()
-      toast({ title: 'Ítem eliminado', status: 'success' })
-    } catch (err) {
+  const removeItem = useMutation({
+    mutationFn: async ({ itemId }) => {
+      return authedFetchJson(`/pedidos/${pedidoId}/items/${itemId}`, { method: 'DELETE' })
+    },
+    onMutate: async ({ itemId }) => {
+      await queryClient.cancelQueries({ queryKey: ['pedido', pedidoId] })
+      const previous = queryClient.getQueryData(['pedido', pedidoId])
+      queryClient.setQueryData(['pedido', pedidoId], (old) => {
+        if (!old || !Array.isArray(old.items)) return old
+        return { ...old, items: old.items.filter(r => r.id !== itemId) }
+      })
+      return { previous }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', pedidoId], ctx.previous)
       toast({ title: 'No se pudo eliminar', description: String(err?.message || err), status: 'error' })
-    } finally {
-      setRemoveTarget(null)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
     }
-  }
+  })
 
-  async function submitOrder() {
-    try {
-      setSubmitting(true)
-      await authedFetchJson(`/pedidos/${pedidoId}/submit`, { method: 'POST' })
+  const submitOrder = useMutation({
+    mutationFn: async () => authedFetchJson(`/pedidos/${pedidoId}/submit`, { method: 'POST' }),
+    onSuccess: () => {
       setStep(3)
-    } catch (err) {
+      queryClient.invalidateQueries({ queryKey: ['pedidos', 'lista'] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
+    },
+    onError: (err) => {
       toast({ title: 'No se pudo enviar', description: String(err?.message || err), status: 'error' })
-    } finally {
-      setSubmitting(false)
     }
-  }
+  })
+
+  // destructive action confirmation (remove item)
+  const [removeTarget, setRemoveTarget] = useState(null)
 
   const step1Valid =
     (form.cliente_id || form.cliente_nombre) &&
@@ -279,8 +283,6 @@ export default function NuevoPedido() {
     form.direccion_entrega &&
     form.fecha_entrega
 
-  // Single, unmistakable primary action per step
-  // Step 1: Siguiente (crear/continuar), Step 2: Siguiente (enviar)
   const primaryAction = step === 1 ? 'next' : step === 2 ? 'submit' : null
 
   return (
@@ -298,9 +300,7 @@ export default function NuevoPedido() {
 
       <Stepper step={step} accent={accent} />
 
-      {/* Top actions row — primary action sits at the end (eye path) */}
       <HStack mb="6" spacing="3" flexWrap="wrap" align="center">
-        {/* Back — removed on step 3 */}
         {step > 1 && step !== 3 && (
           <>
             <IconButton
@@ -309,7 +309,7 @@ export default function NuevoPedido() {
               colorScheme={accent}
               onClick={() => setStep(step - 1)}
               display={{ base: 'inline-flex', md: 'none' }}
-              size="md" /* ≥44px */
+              size="md"
               variant="outline"
             />
             <Button
@@ -326,16 +326,15 @@ export default function NuevoPedido() {
 
         <Spacer />
 
-        {/* Step 1 -> Next (primary) */}
         {step === 1 && (
           <>
             <IconButton
               aria-label={pedidoId ? 'Continuar' : 'Siguiente'}
               icon={<ArrowForwardIcon />}
               colorScheme={accent}
-              onClick={startOrder}
-              isDisabled={!step1Valid || creating}
-              isLoading={creating}
+              onClick={() => startOrder.mutate()}
+              isDisabled={!step1Valid || startOrder.isPending}
+              isLoading={startOrder.isPending}
               display={{ base: 'inline-flex', md: 'none' }}
               size="md"
               variant={primaryAction === 'next' ? 'solid' : 'outline'}
@@ -344,9 +343,9 @@ export default function NuevoPedido() {
               variant={primaryAction === 'next' ? 'solid' : 'outline'}
               colorScheme={accent}
               rightIcon={<ArrowForwardIcon />}
-              onClick={startOrder}
-              isDisabled={!step1Valid || creating}
-              isLoading={creating}
+              onClick={() => startOrder.mutate()}
+              isDisabled={!step1Valid || startOrder.isPending}
+              isLoading={startOrder.isPending}
               display={{ base: 'none', md: 'inline-flex' }}
             >
               {pedidoId ? 'Continuar' : 'Siguiente'}
@@ -354,16 +353,15 @@ export default function NuevoPedido() {
           </>
         )}
 
-        {/* Step 2 -> Next (primary) */}
         {step === 2 && (
           <>
             <IconButton
               aria-label="Siguiente"
               icon={<ArrowForwardIcon />}
               colorScheme={accent}
-              onClick={submitOrder}
-              isDisabled={items.length === 0 || submitting}
-              isLoading={submitting}
+              onClick={() => submitOrder.mutate()}
+              isDisabled={items.length === 0 || submitOrder.isPending}
+              isLoading={submitOrder.isPending}
               display={{ base: 'inline-flex', md: 'none' }}
               size="md"
               variant={primaryAction === 'submit' ? 'solid' : 'outline'}
@@ -372,9 +370,9 @@ export default function NuevoPedido() {
               variant={primaryAction === 'submit' ? 'solid' : 'outline'}
               colorScheme={accent}
               rightIcon={<ArrowForwardIcon />}
-              onClick={submitOrder}
-              isDisabled={items.length === 0 || submitting}
-              isLoading={submitting}
+              onClick={() => submitOrder.mutate()}
+              isDisabled={items.length === 0 || submitOrder.isPending}
+              isLoading={submitOrder.isPending}
               display={{ base: 'none', md: 'inline-flex' }}
             >
               Siguiente
@@ -383,7 +381,6 @@ export default function NuevoPedido() {
         )}
       </HStack>
 
-      {/* Step 1: Form */}
       {step === 1 && (
         <Stack spacing="4" maxW="720px">
           <FormControl isRequired>
@@ -436,7 +433,6 @@ export default function NuevoPedido() {
         </Stack>
       )}
 
-      {/* Step 2: Items */}
       {step === 2 && (
         <Box>
           <HStack mb="4" justify="flex-end">
@@ -459,8 +455,7 @@ export default function NuevoPedido() {
             </Button>
           </HStack>
 
-          {/* Loading skeletons */}
-          {itemsLoading && (
+          {(isOrderLoading || isOrderFetching) && (
             <Stack spacing="4" aria-live="polite">
               {[0,1,2].map(i => (
                 <Card key={`sk-${i}`} variant="outline" sx={{ transition: smooth }}>
@@ -481,7 +476,7 @@ export default function NuevoPedido() {
             </Stack>
           )}
 
-          {!itemsLoading && (
+          {!isOrderLoading && !isOrderFetching && (
             <Stack spacing="4">
               {items.length === 0 ? (
                 <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
@@ -494,7 +489,7 @@ export default function NuevoPedido() {
                     variant="outline"
                     w="full"
                     _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
-                    sx={flashId === it.id ? {
+                    sx={flashId && (flashId === it.id || flashId === it.producto_id) ? {
                       boxShadow: '0 0 0 2px var(--chakra-colors-green-300)',
                       transition: prefersReducedMotion ? 'none' : 'box-shadow 200ms ease'
                     } : { transition: smooth }}
@@ -507,16 +502,18 @@ export default function NuevoPedido() {
                         </Box>
                         <Box textAlign="right" minW="100px">
                           <Text fontSize="sm" color="gray.500" mb="1">Cantidad</Text>
-                          {/* Controlled */}
                           <NumberInput
                             size="sm"
                             value={Number(it.cantidad) || 0}
                             min={1}
                             onChange={(_, valNum) => {
-                              const v = isFinite(valNum) ? valNum : Number(it.cantidad) || 1
-                              setItems(prev => prev.map(row => row.id === it.id ? { ...row, cantidad: v } : row))
+                              const v = Number.isFinite(valNum) ? valNum : Number(it.cantidad) || 1
+                              patchItemInCache(it.id, { cantidad: v })
                             }}
-                            onBlur={(e) => updateItem(it, { cantidad: Number(e.target.value) })}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value)
+                              updateItem.mutate({ itemId: it.id, fields: { cantidad: Number.isFinite(v) ? v : Number(it.cantidad) || 1 } })
+                            }}
                             w="120px"
                           >
                             <NumberInputField
@@ -535,16 +532,18 @@ export default function NuevoPedido() {
                       <HStack justify="space-between" align="center" wrap="wrap">
                         <HStack>
                           <Text fontSize="sm" color="gray.500">Precio</Text>
-                          {/* Controlled */}
                           <NumberInput
                             size="sm"
                             value={Number(it.precio) || 0}
                             min={0}
                             onChange={(_, valNum) => {
-                              const v = isFinite(valNum) ? valNum : Number(it.precio) || 0
-                              setItems(prev => prev.map(row => row.id === it.id ? { ...row, precio: v } : row))
+                              const v = Number.isFinite(valNum) ? valNum : Number(it.precio) || 0
+                              patchItemInCache(it.id, { precio: v })
                             }}
-                            onBlur={(e) => updateItem(it, { precio: Number(e.target.value) })}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value)
+                              updateItem.mutate({ itemId: it.id, fields: { precio: Number.isFinite(v) ? v : Number(it.precio) || 0 } })
+                            }}
                             w="160px"
                           >
                             <NumberInputField
@@ -578,17 +577,15 @@ export default function NuevoPedido() {
             <InventoryPickerModal
               isOpen={picker.isOpen}
               onClose={picker.onClose}
-              onAdd={handleAddFromPicker}
+              onAdd={(sel) => addItem.mutate(sel)}
               orderItems={items}
             />
           </Suspense>
         </Box>
       )}
 
-      {/* Step 3: Success screen (no Back button) */}
       {step === 3 && (
         <VStack spacing="8" align="center" textAlign="center" mt={{ base: 2, md: 4 }}>
-          {/* Success icon + headline + subtitle */}
           <VStack spacing="4">
             <Box
               w="14" h="14"
@@ -607,7 +604,6 @@ export default function NuevoPedido() {
 
           <TextDivider>Acciones</TextDivider>
 
-          {/* Action buttons: single primary ("Crear otro") */}
           <HStack spacing="3" flexWrap="wrap" justify="center">
             <Button
               leftIcon={<AddIcon aria-hidden="true" />}
@@ -615,7 +611,7 @@ export default function NuevoPedido() {
               onClick={() => {
                 setStep(1)
                 setPedidoId(null)
-                setItems([])
+                queryClient.removeQueries({ queryKey: ['pedido'], exact: false })
                 setForm({
                   cliente_id: null,
                   cliente_nombre: '',
@@ -623,7 +619,6 @@ export default function NuevoPedido() {
                   direccion_entrega: '',
                   fecha_entrega: ''
                 })
-                // focus will move to heading via useEffect
               }}
             >
               Crear otro
@@ -636,7 +631,6 @@ export default function NuevoPedido() {
             </Button>
           </HStack>
 
-          {/* Order summary card */}
           <Box w="full" maxW="900px">
             <Card variant="outline">
               <CardHeader pb="2">
@@ -698,7 +692,6 @@ export default function NuevoPedido() {
         </VStack>
       )}
 
-      {/* Remove item confirmation dialog */}
       <AlertDialog
         isOpen={!!removeTarget}
         leastDestructiveRef={undefined}
@@ -718,7 +711,10 @@ export default function NuevoPedido() {
               <Button variant="outline" onClick={() => setRemoveTarget(null)}>
                 Cancelar
               </Button>
-              <Button colorScheme="red" onClick={removeItemConfirmed} ml={3}>
+              <Button colorScheme="red" onClick={() => {
+                if (removeTarget) removeItem.mutate({ itemId: removeTarget.id })
+                setRemoveTarget(null)
+              }} ml={3}>
                 Eliminar
               </Button>
             </AlertDialogFooter>

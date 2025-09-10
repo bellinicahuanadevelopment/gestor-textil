@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useMemo, useState, useRef } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Card, CardBody, CardHeader, Button,
   IconButton, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper,
@@ -14,36 +14,27 @@ import {
 } from '@chakra-ui/icons'
 import { FiSave } from 'react-icons/fi'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuthedFetch } from '../lib/api'
+import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuth } from '../contexts/AuthContext'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import InventoryPickerModal from '../components/InventoryPickerModal'
 
 function money(n){try{return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(Number(n||0))}catch{return `${n}`}}
 const fmtTime = (d)=> new Intl.DateTimeFormat('es-CO',{hour:'2-digit',minute:'2-digit'}).format(d)
-
-// Short reference for titles/labels (first 8 chars of UUID, uppercased)
-function formatRef(id){
-  if(!id) return '—'
-  const s = String(id)
-  const short = s.includes('-') ? s.split('-')[0] : s.slice(0,8)
-  return short.toUpperCase()
-}
+function formatRef(id){ if(!id) return '—'; const s=String(id); const short=s.includes('-')?s.split('-')[0]:s.slice(0,8); return short.toUpperCase() }
 
 export default function PedidoDetalle(){
   const { id } = useParams()
   const navigate = useNavigate()
-  const { authedFetch } = useAuthedFetch()
+  const authedFetchJson = useAuthedFetchJson()
+  const queryClient = useQueryClient()
   const { prefs } = useThemePrefs()
   const { user } = useAuth()
   const accent = prefs?.accent || 'teal'
   const toast = useToast()
 
-  const [head, setHead] = useState(null)
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [adding, setAdding] = useState(false)
   const [dirtyIds, setDirtyIds] = useState(() => new Set())
-  const [saving, setSaving] = useState(false)
   const [approving, setApproving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -51,20 +42,26 @@ export default function PedidoDetalle(){
   const prefersReducedMotion = usePrefersReducedMotion()
   const smooth = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
 
-  // delete dialog
   const { isOpen: isDeleteOpen, onOpen: openDelete, onClose: closeDelete } = useDisclosure()
+  const { isOpen: adding, onOpen: openAdd, onClose: closeAdd } = useDisclosure()
   const cancelRef = useRef()
 
-  async function load(){
-    setLoading(true)
-    const res = await authedFetch(`/pedidos/${id}`)
-    const data = await res.json()
-    setHead(data.pedido || null)
-    setItems(Array.isArray(data.items) ? data.items : [])
-    setDirtyIds(new Set())
-    setLoading(false)
-  }
-  useEffect(()=>{ load() },[id])
+  const {
+    data: order,
+    isLoading,
+    isFetching
+  } = useQuery({
+    queryKey: ['pedido', id],
+    queryFn: () => authedFetchJson(`/pedidos/${id}`),
+    enabled: !!id,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    placeholderData: (prev) => prev
+  })
+
+  const head = order?.pedido || null
+  const items = Array.isArray(order?.items) ? order.items : []
 
   const isApprover = ['manager', 'admin'].includes(user?.profile)
   const isApproved = (status) => {
@@ -74,100 +71,149 @@ export default function PedidoDetalle(){
   const isDraft = (status) => String(status||'').toLowerCase() === 'draft'
   const canEdit = head && !isApproved(head.status)
 
-  // removeItem
-  async function removeItem(itemId){
-    const r = await authedFetch(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' })
-    if(!r.ok){ toast({status:'error', title:'No se pudo eliminar el ítem'}) ; return }
-    toast({status:'success', title:'Ítem eliminado'})
-    load()
+  function patchOrder(fn){
+    queryClient.setQueryData(['pedido', id], (old) => (old ? fn(old) : old))
+  }
+  function patchItemInCache(itemId, patch){
+    patchOrder((old) => {
+      if (!Array.isArray(old.items)) return old
+      return { ...old, items: old.items.map(r => r.id === itemId ? { ...r, ...patch } : r) }
+    })
   }
 
-  // confirm delete (from dialog)
-  async function confirmDelete(){
-    setDeleting(true)
-    const r = await authedFetch(`/pedidos/${id}`, { method:'DELETE' })
-    setDeleting(false)
-    if(!r.ok){
-      toast({status:'error', title:'No se pudo eliminar el pedido'})
-      return
+  const updateItem = useMutation({
+    mutationFn: async ({ itemId, fields }) => {
+      return authedFetchJson(`/pedidos/${id}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(fields) })
+    },
+    onMutate: async ({ itemId, fields }) => {
+      await queryClient.cancelQueries({ queryKey: ['pedido', id] })
+      const previous = queryClient.getQueryData(['pedido', id])
+      patchItemInCache(itemId, fields)
+      return { previous }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', id], ctx.previous)
+      toast({ status:'error', title:'No se pudo actualizar', description: String(err?.message || err) })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
     }
-    toast({status:'success', title:'Pedido eliminado'})
-    closeDelete()
-    navigate('/pedidos')
-  }
+  })
 
-  // Save all edited items
+  const removeItem = useMutation({
+    mutationFn: async ({ itemId }) => authedFetchJson(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' }),
+    onMutate: async ({ itemId }) => {
+      await queryClient.cancelQueries({ queryKey: ['pedido', id] })
+      const previous = queryClient.getQueryData(['pedido', id])
+      patchOrder((old) => {
+        if (!Array.isArray(old?.items)) return old
+        return { ...old, items: old.items.filter(r => r.id !== itemId) }
+      })
+      return { previous }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', id], ctx.previous)
+      toast({ status:'error', title:'No se pudo eliminar el ítem', description: String(err?.message || err) })
+    },
+    onSuccess: () => {
+      toast({ status:'success', title:'Ítem eliminado' })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
+    }
+  })
+
+  const approve = useMutation({
+    mutationFn: async () => authedFetchJson(`/pedidos/${id}/approve`, { method:'POST' }),
+    onMutate: async () => {
+      setApproving(true)
+      await queryClient.cancelQueries({ queryKey: ['pedido', id] })
+      const previous = queryClient.getQueryData(['pedido', id])
+      const optimisticAt = new Date().toISOString()
+      patchOrder((old) => {
+        const p = old?.pedido ? { ...old.pedido, status:'approved', approved_at: optimisticAt } : old?.pedido
+        return { ...old, pedido: p }
+      })
+      return { previous, optimisticAt }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', id], ctx.previous)
+      toast({ status:'error', title:'No se pudo aprobar', description: String(err?.message || err) })
+    },
+    onSuccess: (data, _vars, ctx) => {
+      const approvedAt = data?.pedido?.approved_at ? new Date(data.pedido.approved_at) : (ctx?.optimisticAt ? new Date(ctx.optimisticAt) : new Date())
+      toast({ status:'success', title:'Pedido aprobado', description:`Aprobado a las ${fmtTime(approvedAt)}` })
+    },
+    onSettled: () => {
+      setApproving(false)
+      queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      queryClient.invalidateQueries({ queryKey: ['pedidos', 'lista'] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
+    }
+  })
+
+  const submit = useMutation({
+    mutationFn: async () => authedFetchJson(`/pedidos/${id}/submit`, { method:'POST' }),
+    onMutate: async () => {
+      setSubmitting(true)
+      await queryClient.cancelQueries({ queryKey: ['pedido', id] })
+      const previous = queryClient.getQueryData(['pedido', id])
+      patchOrder((old) => {
+        const p = old?.pedido ? { ...old.pedido, status:'submitted' } : old?.pedido
+        return { ...old, pedido: p }
+      })
+      return { previous }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['pedido', id], ctx.previous)
+      toast({ status:'error', title:'No se pudo enviar', description: String(err?.message || err) })
+    },
+    onSuccess: () => {
+      toast({ status:'success', title:'Pedido enviado' })
+    },
+    onSettled: () => {
+      setSubmitting(false)
+      queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      queryClient.invalidateQueries({ queryKey: ['pedidos', 'lista'] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
+    }
+  })
+
+  const deleteOrder = useMutation({
+    mutationFn: async () => authedFetchJson(`/pedidos/${id}`, { method:'DELETE' }),
+    onMutate: () => setDeleting(true),
+    onError: () => {
+      toast({ status:'error', title:'No se pudo eliminar el pedido' })
+      setDeleting(false)
+    },
+    onSuccess: () => {
+      toast({ status:'success', title:'Pedido eliminado' })
+      queryClient.removeQueries({ queryKey: ['pedido', id] })
+      queryClient.invalidateQueries({ queryKey: ['pedidos', 'lista'] })
+      queryClient.invalidateQueries({ queryKey: ['inventario'] })
+      closeDelete()
+      navigate('/pedidos')
+    }
+  })
+
   async function saveAll(){
     if (dirtyIds.size === 0) return
-    setSaving(true)
-    const toSave = items.filter(i => dirtyIds.has(i.id)).map(i => ({
-      id: i.id,
-      body: { cantidad: Number(i.cantidad), precio: Number(i.precio) }
-    }))
-
-    const failures = []
-    for (const s of toSave) {
-      const r = await authedFetch(`/pedidos/${id}/items/${s.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(s.body)
-      })
-      if (!r.ok) failures.push(s.id)
-    }
-    setSaving(false)
-
-    if (failures.length) {
-      toast({ status:'error', title:`No se guardaron ${failures.length} ítem(s)` })
-    } else {
+    const snapshot = queryClient.getQueryData(['pedido', id])
+    try {
+      const toSave = (snapshot?.items || []).filter(i => dirtyIds.has(i.id)).map(i => ({
+        id: i.id,
+        body: { cantidad: Number(i.cantidad), precio: Number(i.precio) }
+      }))
+      await Promise.all(toSave.map(s => updateItem.mutateAsync({ itemId: s.id, fields: s.body })))
+      setDirtyIds(new Set())
       toast({ status:'success', title:`Cambios guardados (${toSave.length})` })
-      await load()
-    }
-  }
-
-  // ---- Approval
-  async function handleApprove(){
-    if (!isApprover || !head || isApproved(head.status)) return
-    const prev = head.status
-    const optimisticAt = new Date()
-    setHead(h => h ? { ...h, status: 'approved', approved_at: optimisticAt.toISOString() } : h)
-    setApproving(true)
-    try {
-      const r = await authedFetch(`/pedidos/${id}/approve`, { method:'POST' })
-      const data = await r.json().catch(()=> ({}))
-      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
-      const newStatus = data?.pedido?.status || 'approved'
-      const approvedAt = data?.pedido?.approved_at ? new Date(data.pedido.approved_at) : optimisticAt
-      setHead(h => h ? { ...h, status: newStatus, approved_at: approvedAt.toISOString() } : h)
-      toast({
-        status:'success',
-        title:'Pedido aprobado',
-        description:`Aprobado a las ${fmtTime(approvedAt)}`
-      })
     } catch (err) {
-      setHead(h => h ? { ...h, status: prev, approved_at: undefined } : h)
-      toast({ status:'error', title:'No se pudo aprobar', description: String(err?.message || err) })
-    } finally {
-      setApproving(false)
+      toast({ status:'error', title:'Error al guardar cambios', description:String(err?.message || err) })
     }
   }
 
-  // ---- Submit (draft → submitted) for regular users
-  async function handleSubmit(){
-    if (!head || !isDraft(head.status)) return
-    setSubmitting(true)
-    try {
-      const r = await authedFetch(`/pedidos/${id}/submit`, { method:'POST' })
-      const data = await r.json().catch(()=> ({}))
-      if (!r.ok) throw new Error(data?.message || `HTTP ${r.status}`)
-      setHead(h => h ? { ...h, status: 'submitted' } : h)
-      toast({ status:'success', title:'Pedido enviado' })
-    } catch (err) {
-      toast({ status:'error', title:'No se pudo enviar', description: String(err?.message || err) })
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  // ——— Look & feel
   const underline = useColorModeValue(`${accent}.500`, `${accent}.300`)
   const pillBg = useColorModeValue(`${accent}.50`, `${accent}.900`)
   const pillColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
@@ -183,21 +229,10 @@ export default function PedidoDetalle(){
   const showApprove = isApprover && head && !isApproved(head.status)
   const showSubmit = !isApprover && head && isDraft(head.status)
 
-  // Single, unmistakable primary action (by state)
-  // Priority: Approbar > Guardar (si hay cambios) > Enviar
   const primary =
     showApprove ? 'approve' :
     (dirtyCount > 0 ? 'save' :
      (showSubmit ? 'submit' : null))
-
-  const statusColor = (s) => {
-    const k = String(s||'').toLowerCase()
-    if (k === 'draft') return 'gray'
-    if (k === 'submitted') return 'blue'
-    if (k === 'approved') return 'green'
-    if (k === 'cancelled') return 'red'
-    return 'gray'
-  }
 
   return (
     <Box as="main">
@@ -209,18 +244,23 @@ export default function PedidoDetalle(){
           {head.cliente_nombre} • {head.direccion_entrega} • Entrega: {head.fecha_entrega}
           <Badge
             ml="3"
-            colorScheme={statusColor(head.status)}
+            colorScheme={(s => {
+              const k = String(s||'').toLowerCase()
+              if (k === 'draft') return 'gray'
+              if (k === 'submitted') return 'blue'
+              if (k === 'approved') return 'green'
+              if (k === 'cancelled') return 'red'
+              return 'gray'
+            })(head.status)}
             textTransform="none"
             aria-label={`Estado: ${head.status}`}
           >
-            {/* pair color with label & dot for non-color users */}
             <Box as="span" mr="1" w="2" h="2" rounded="full" bg="currentColor" display="inline-block" aria-hidden="true" />
             {head.status}
           </Badge>
         </Text>
       )}
 
-      {/* Top bar — responsive layout */}
       <Stack
         direction={{ base: 'column', md: 'row' }}
         align={{ base: 'stretch', md: 'center' }}
@@ -232,7 +272,6 @@ export default function PedidoDetalle(){
         mb="3"
         spacing={{ base: 3, md: 2 }}
       >
-        {/* LEFT: back arrow + tabs */}
         <HStack spacing="2" align="center">
           <Tooltip label="Volver a pedidos">
             <IconButton
@@ -252,7 +291,6 @@ export default function PedidoDetalle(){
           </Tabs>
         </HStack>
 
-        {/* RIGHT: actions (Submit only lives here) */}
         <HStack spacing="2" justify="flex-end">
           {showSubmit && (
             <Tooltip label="Enviar pedido">
@@ -262,7 +300,7 @@ export default function PedidoDetalle(){
                   icon={<CheckIcon />}
                   colorScheme={accent}
                   variant={primary === 'submit' ? 'solid' : 'outline'}
-                  onClick={handleSubmit}
+                  onClick={() => submit.mutate()}
                   isDisabled={submitting}
                   isLoading={submitting}
                   size="sm"
@@ -272,7 +310,7 @@ export default function PedidoDetalle(){
                   leftIcon={<CheckIcon />}
                   colorScheme={accent}
                   variant={primary === 'submit' ? 'solid' : 'outline'}
-                  onClick={handleSubmit}
+                  onClick={() => submit.mutate()}
                   isDisabled={submitting}
                   isLoading={submitting}
                   size="sm"
@@ -285,11 +323,8 @@ export default function PedidoDetalle(){
         </HStack>
       </Stack>
 
-      {/* Items panel */}
       <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
-        {/* Actions row at panel top-right */}
         <HStack justify="flex-end" mb="2" spacing="2">
-          {/* Save */}
           <Tooltip label={dirtyCount ? `Guardar cambios (${dirtyCount})` : (canEdit ? 'Nada por guardar' : 'Pedido aprobado')}>
             {compact ? (
               <IconButton
@@ -297,8 +332,8 @@ export default function PedidoDetalle(){
                 icon={<FiSave />}
                 colorScheme={accent}
                 onClick={saveAll}
-                isDisabled={!canEdit || dirtyCount === 0 || saving}
-                isLoading={saving}
+                isDisabled={!canEdit || dirtyCount === 0}
+                isLoading={updateItem.isPending}
                 size="sm"
                 variant={primary === 'save' ? 'solid' : 'outline'}
               />
@@ -307,8 +342,8 @@ export default function PedidoDetalle(){
                 leftIcon={<FiSave />}
                 colorScheme={accent}
                 onClick={saveAll}
-                isDisabled={!canEdit || dirtyCount === 0 || saving}
-                isLoading={saving}
+                isDisabled={!canEdit || dirtyCount === 0}
+                isLoading={updateItem.isPending}
                 variant={primary === 'save' ? 'solid' : 'outline'}
                 size="sm"
               >
@@ -317,7 +352,6 @@ export default function PedidoDetalle(){
             )}
           </Tooltip>
 
-          {/* Delete order */}
           <Tooltip label={canEdit ? 'Eliminar pedido' : 'No se puede eliminar un pedido aprobado'}>
             {compact ? (
               <IconButton
@@ -345,7 +379,31 @@ export default function PedidoDetalle(){
             )}
           </Tooltip>
 
-          {/* Approve */}
+          <Tooltip label={canEdit ? 'Agregar ítem' : 'Pedido aprobado'}>
+            {compact ? (
+              <IconButton
+                aria-label="Agregar ítem"
+                icon={<AddIcon />}
+                colorScheme={accent}
+                onClick={openAdd}
+                isDisabled={!canEdit}
+                size="sm"
+                variant="outline"
+              />
+            ) : (
+              <Button
+                leftIcon={<AddIcon />}
+                colorScheme={accent}
+                onClick={openAdd}
+                isDisabled={!canEdit}
+                variant="outline"
+                size="sm"
+              >
+                Agregar ítem
+              </Button>
+            )}
+          </Tooltip>
+
           {showApprove && (
             <Tooltip label="Aprobar pedido">
               {compact ? (
@@ -354,7 +412,7 @@ export default function PedidoDetalle(){
                   icon={<CheckIcon />}
                   colorScheme={accent}
                   variant={primary === 'approve' ? 'solid' : 'outline'}
-                  onClick={handleApprove}
+                  onClick={() => approve.mutate()}
                   isDisabled={approving}
                   isLoading={approving}
                   size="sm"
@@ -364,7 +422,7 @@ export default function PedidoDetalle(){
                   leftIcon={<CheckIcon />}
                   colorScheme={accent}
                   variant={primary === 'approve' ? 'solid' : 'outline'}
-                  onClick={handleApprove}
+                  onClick={() => approve.mutate()}
                   isDisabled={approving}
                   isLoading={approving}
                   size="sm"
@@ -374,39 +432,11 @@ export default function PedidoDetalle(){
               )}
             </Tooltip>
           )}
-
-          {/* Add item */}
-          <Tooltip label={canEdit ? 'Agregar ítem' : 'Pedido aprobado'}>
-            {compact ? (
-              <IconButton
-                aria-label="Agregar ítem"
-                icon={<AddIcon />}
-                colorScheme={accent}
-                onClick={()=>setAdding(true)}
-                isDisabled={!canEdit}
-                size="sm"
-                variant="outline"
-              />
-            ) : (
-              <Button
-                leftIcon={<AddIcon />}
-                colorScheme={accent}
-                onClick={()=>setAdding(true)}
-                isDisabled={!canEdit}
-                variant="outline"
-                size="sm"
-              >
-                Agregar ítem
-              </Button>
-            )}
-          </Tooltip>
         </HStack>
 
-        {/* Divider separating actions and cards (inside same container) */}
         <Divider my="3" />
 
-        {/* Loading skeletons */}
-        {loading && (
+        {(isLoading || isFetching) && (
           <Stack spacing="3" aria-live="polite">
             {[0,1,2].map(i => (
               <Card key={`sk-${i}`} variant="outline" sx={{ transition: smooth }}>
@@ -427,7 +457,7 @@ export default function PedidoDetalle(){
           </Stack>
         )}
 
-        {!loading && (
+        {!isLoading && !isFetching && (
           <Stack spacing="3">
             {items.map(it => (
               <Card
@@ -452,7 +482,7 @@ export default function PedidoDetalle(){
                       size="sm"
                       variant="outline"
                       colorScheme="red"
-                      onClick={()=>removeItem(it.id)}
+                      onClick={()=>removeItem.mutate({ itemId: it.id })}
                       isDisabled={!canEdit}
                     />
                   </HStack>
@@ -467,8 +497,8 @@ export default function PedidoDetalle(){
                         precision={2}
                         step={1}
                         onChange={(_,v)=>{
-                          const val = isFinite(v)?v:0
-                          setItems(prev=>prev.map(p=>p.id===it.id?{...p,cantidad:val}:p))
+                          const val = Number.isFinite(v)?v:0
+                          patchItemInCache(it.id, { cantidad: val })
                           setDirtyIds(prev => new Set(prev).add(it.id))
                         }}
                         maxW="160px"
@@ -495,8 +525,8 @@ export default function PedidoDetalle(){
                         min={0}
                         step={1000}
                         onChange={(_,v)=>{
-                          const val = isFinite(v)?v:0
-                          setItems(prev=>prev.map(p=>p.id===it.id?{...p,precio:val}:p))
+                          const val = Number.isFinite(v)?v:0
+                          patchItemInCache(it.id, { precio: val })
                           setDirtyIds(prev => new Set(prev).add(it.id))
                         }}
                         maxW="200px"
@@ -538,17 +568,14 @@ export default function PedidoDetalle(){
         )}
       </Box>
 
-      {/* Add Item Modal */}
       <AddItemModal
         isOpen={adding}
-        onClose={()=>setAdding(false)}
-        onAdded={load}
+        onClose={closeAdd}
         pedidoId={id}
         orderItems={items}
         lock={!canEdit}
       />
 
-      {/* Delete confirmation dialog */}
       <AlertDialog
         isOpen={isDeleteOpen}
         leastDestructiveRef={cancelRef}
@@ -569,7 +596,7 @@ export default function PedidoDetalle(){
               <Button ref={cancelRef} variant="outline" colorScheme={accent} onClick={closeDelete}>
                 Cancelar
               </Button>
-              <Button colorScheme="red" onClick={confirmDelete} ml={3} isLoading={deleting}>
+              <Button colorScheme="red" onClick={() => deleteOrder.mutate()} ml={3} isLoading={deleting}>
                 Eliminar
               </Button>
             </AlertDialogFooter>
@@ -611,16 +638,17 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
   )
 }
 
-/* Item picker modal */
-function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], lock=false }){
-  const { authedFetch } = useAuthedFetch()
+/* Item picker modal (controlled from parent) */
+function AddItemModal({ isOpen, onClose, pedidoId, orderItems = [], lock=false }){
+  const authedFetchJson = useAuthedFetchJson()
+  const queryClient = useQueryClient()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
-  const [rows,setRows] = useState([])
   const [q,setQ] = useState('')
   const [page,setPage] = useState(1)
   const [pageSize,setPageSize] = useState(5)
   const [qtyById,setQtyById] = useState({})
+
   const inputBg = useColorModeValue('blackAlpha.50','whiteAlpha.100')
   const inputBorder = useColorModeValue('blackAlpha.200','whiteAlpha.300')
 
@@ -633,14 +661,28 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
     return m
   }, [orderItems])
 
-  useEffect(()=>{
-    async function load(){
-      const r = await authedFetch(`/inventario/resumen?pedido_id=${pedidoId}`)
-      const data = await r.json()
-      setRows(Array.isArray(data)?data:[])
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['inventario','resumen',{ pedidoId }],
+    queryFn: () => authedFetchJson(`/inventario/resumen?pedido_id=${pedidoId}`),
+    enabled: isOpen,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 0
+  })
+
+  const addItem = useMutation({
+    mutationFn: async ({ producto_id, cantidad, precio }) => {
+      return authedFetchJson(`/pedidos/${pedidoId}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ producto_id, cantidad, precio })
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
+      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
+      onClose()
     }
-    if(isOpen) load()
-  },[isOpen, authedFetch, pedidoId])
+  })
 
   const fold = (v)=> (v??'').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()
   const filtered = useMemo(()=>{
@@ -653,20 +695,6 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
   const safePage = Math.min(page,totalPages)
   const start = (safePage-1)*pageSize
   const pageRows = filtered.slice(start, start+pageSize)
-
-  async function add(prod){
-    const base = Number((prod.cantidad_disponible ?? prod.cantidad_actual ?? 0))
-    const mine = Number(inThisOrder[prod.id] || 0)
-    const available = Math.max(0, base - mine)
-
-    let cantidad = Number(qtyById[prod.id] || 0)
-    if(cantidad<=0) return
-    if (cantidad > available) cantidad = available
-
-    const body = { producto_id: prod.id, cantidad, precio: Number(prod.precio_lista||0) }
-    const r = await authedFetch(`/pedidos/${pedidoId}/items`, { method:'POST', body: JSON.stringify(body) })
-    if(r.ok){ onAdded(); onClose() }
-  }
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
@@ -682,7 +710,7 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
               <Input
                 placeholder="Buscar por descripción, referencia o color"
                 value={q}
-                onChange={e=>setQ(e.target.value)}
+                onChange={e=>{ setQ(e.target.value); setPage(1) }}
                 variant="filled"
                 bg={inputBg}
                 borderColor={inputBorder}
@@ -696,7 +724,7 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
               <select
                 aria-label="Cantidad de resultados por página"
                 value={pageSize}
-                onChange={e=>setPageSize(Number(e.target.value))}
+                onChange={e=>{ setPageSize(Number(e.target.value)); setPage(1) }}
                 style={{ border: '1px solid var(--chakra-colors-gray-200)', borderRadius: 6, padding: '6px 8px' }}
               >
                 <option value={5}>5</option><option value={10}>10</option><option value={15}>15</option>
@@ -705,7 +733,26 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
           </HStack>
 
           <Stack spacing="4">
-            {pageRows.map(p=>{
+            {(isLoading ? Array.from({ length: 3 }) : pageRows).map((p, idx) => {
+              if (isLoading) {
+                return (
+                  <Card key={`sk-${idx}`} variant="outline">
+                    <CardHeader pb="2">
+                      <HStack justify="space-between" align="start">
+                        <Box w="full">
+                          <Skeleton height="24px" maxW="240px" />
+                          <SkeletonText mt="2" noOfLines={1} maxW="200px" />
+                        </Box>
+                        <Skeleton height="24px" width="80px" />
+                      </HStack>
+                    </CardHeader>
+                    <CardBody pt="2">
+                      <SkeletonText noOfLines={2} />
+                    </CardBody>
+                  </Card>
+                )
+              }
+
               const base = Number((p.cantidad_disponible ?? p.cantidad_actual ?? 0))
               const mine = Number(inThisOrder[p.id] || 0)
               const available = Math.max(0, base - mine)
@@ -740,7 +787,7 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
                           value={qtyById[p.id] ?? 0}
                           min={0}
                           max={available}
-                          onChange={(_,v)=>setQtyById(prev=>({...prev, [p.id]: isFinite(v)?v:0}))}
+                          onChange={(_,v)=>setQtyById(prev=>({...prev, [p.id]: Number.isFinite(v)?v:0}))}
                           w="160px"
                           isDisabled={lock}
                         >
@@ -757,7 +804,18 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
                           </NumberInputStepper>
                         </NumberInput>
                       </Box>
-                      <Button leftIcon={<AddIcon />} colorScheme={accent} onClick={()=>add(p)} isDisabled={available<=0 || lock}>
+                      <Button
+                        leftIcon={<AddIcon />}
+                        colorScheme={accent}
+                        onClick={()=>{
+                          let cantidad = Number(qtyById[p.id] || 0)
+                          if (cantidad <= 0) return
+                          if (cantidad > available) cantidad = available
+                          const precio = Number(p.precio_lista || 0)
+                          addItem.mutate({ producto_id: p.id, cantidad, precio })
+                        }}
+                        isDisabled={available<=0 || lock}
+                      >
                         Agregar
                       </Button>
                     </HStack>
@@ -767,28 +825,29 @@ function AddItemModal({ isOpen, onClose, onAdded, pedidoId, orderItems = [], loc
             })}
           </Stack>
 
-          {/* Centered pager */}
-          <HStack mt="4" justify="center" spacing="6">
-            <IconButton
-              aria-label="Página anterior"
-              icon={<ChevronLeftIcon />}
-              variant="outline"
-              size="sm"
-              isDisabled={safePage <= 1}
-              onClick={()=>setPage(p=>Math.max(1, p-1))}
-            />
-            <Text fontSize="sm" color="gray.600">
-              Página {safePage} de {totalPages}
-            </Text>
-            <IconButton
-              aria-label="Página siguiente"
-              icon={<ChevronRightIcon />}
-              variant="outline"
-              size="sm"
-              isDisabled={safePage >= totalPages}
-              onClick={()=>setPage(p=>Math.min(totalPages, p+1))}
-            />
-          </HStack>
+          {!isLoading && (
+            <HStack mt="4" justify="center" spacing="6">
+              <IconButton
+                aria-label="Página anterior"
+                icon={<ChevronLeftIcon />}
+                variant="outline"
+                size="sm"
+                isDisabled={safePage <= 1}
+                onClick={()=>setPage(p=>Math.max(1, p-1))}
+              />
+              <Text fontSize="sm" color="gray.600">
+                Página {safePage} de {totalPages}
+              </Text>
+              <IconButton
+                aria-label="Página siguiente"
+                icon={<ChevronRightIcon />}
+                variant="outline"
+                size="sm"
+                isDisabled={safePage >= totalPages}
+                onClick={()=>setPage(p=>Math.min(totalPages, p+1))}
+              />
+            </HStack>
+          )}
         </ModalBody>
         <ModalFooter>
           <Button onClick={onClose}>Cerrar</Button>

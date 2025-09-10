@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   Box,
   Heading,
@@ -26,11 +26,10 @@ import {
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { Link } from 'react-router-dom'
-import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
+import { useInventorySummaryQuery } from '../lib/hooks/useInventoryQuery'
 
 export default function Inventario() {
-  const authedFetchJson = useAuthedFetchJson()
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
@@ -46,37 +45,13 @@ export default function Inventario() {
   const prefersReducedMotion = usePrefersReducedMotion()
   const transition = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
 
-  const mountedRef = useRef(false)
-
-  const [rows, setRows] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  // Load inventory via TanStack Query
+  const { data: rowsData = [], isLoading, isError, error } = useInventorySummaryQuery()
+  const rows = Array.isArray(rowsData) ? rowsData : []
 
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
-
-  useEffect(() => {
-    mountedRef.current = true
-    async function load() {
-      try {
-        if (!mountedRef.current) return
-        setLoading(true)
-        setError(null)
-        const data = await authedFetchJson('/inventario/resumen')
-        if (!mountedRef.current) return
-        setRows(Array.isArray(data) ? data : [])
-      } catch (err) {
-        if (!mountedRef.current) return
-        setError(err?.message || 'Error al cargar el inventario')
-        setRows([])
-      } finally {
-        if (mountedRef.current) setLoading(false)
-      }
-    }
-    load()
-    return () => { mountedRef.current = false }
-  }, [])
 
   function norm(s) {
     return String(s || '')
@@ -86,7 +61,6 @@ export default function Inventario() {
   }
 
   const filtered = useMemo(() => {
-    if (!rows) return []
     const q = norm(query)
     if (!q) return rows
     return rows.filter(p => {
@@ -97,8 +71,6 @@ export default function Inventario() {
     })
   }, [rows, query])
 
-  useEffect(() => { setPage(1) }, [query, pageSize])
-
   const total = filtered.length
   const lastPage = Math.max(1, Math.ceil(total / pageSize))
   const pageSafe = Math.min(page, lastPage)
@@ -107,7 +79,7 @@ export default function Inventario() {
   const pageRows = filtered.slice(startIdx, endIdx)
 
   const content = useMemo(() => {
-    if (loading) {
+    if (isLoading) {
       return (
         <Stack spacing="4" aria-busy="true" aria-live="polite">
           <Skeleton height="120px" />
@@ -116,8 +88,8 @@ export default function Inventario() {
         </Stack>
       )
     }
-    if (error) {
-      return <Text color="red.400" fontSize="sm" role="alert">Error: {error}</Text>
+    if (isError) {
+      return <Text color="red.400" fontSize="sm" role="alert">Error: {error?.message || 'Error al cargar el inventario'}</Text>
     }
     if (!pageRows || pageRows.length === 0) {
       return <Text color="gray.500">No hay resultados.</Text>
@@ -188,7 +160,7 @@ export default function Inventario() {
         })}
       </Stack>
     )
-  }, [loading, error, pageRows, accent, headingColor, numberColor, transition])
+  }, [isLoading, isError, error, pageRows, accent, headingColor, numberColor, transition])
 
   return (
     <Box as="main">
@@ -204,7 +176,7 @@ export default function Inventario() {
           to="/inventario/movimientos/nuevo"
           aria-label="Registrar movimiento de inventario"
           colorScheme={accent}
-          icon={<ChevronRightIcon />} // visually distinct; swap to a custom icon if you have one
+          icon={<ChevronRightIcon />}
           variant="solid"
         />
       </HStack>
@@ -221,7 +193,10 @@ export default function Inventario() {
               aria-label="Buscar por descripción, referencia o color"
               placeholder="Descripción, referencia o color"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setPage(1)
+              }}
               variant="filled"
               bg={inputBg}
               _hover={{ bg: inputBg }}
@@ -238,7 +213,10 @@ export default function Inventario() {
           <Select
             size="sm"
             value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value))
+              setPage(1)
+            }}
             width="84px"
             aria-label="Cantidad de productos por página"
           >

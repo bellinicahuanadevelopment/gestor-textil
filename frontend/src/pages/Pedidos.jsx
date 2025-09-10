@@ -208,7 +208,7 @@ export default function Pedidos() {
                     <HStack justify="space-between" wrap="wrap" align="baseline">
                       <Text fontSize="sm" color={muted}>Entrega: {p.fecha_entrega}</Text>
                       <HStack>
-                        <Text fontSize="sm" color="gray.500">Ítems:</Text>
+                        <Text fontSize="sm" color="gray.500">Artículos:</Text>
                         <Text
                           fontWeight="semibold"
                           fontFamily="mono"
@@ -270,12 +270,4 @@ export default function Pedidos() {
       </HStack>
     </Box>
   )
-}
-
-function statusColor(s) {
-  if (s === 'draft') return 'gray'
-  if (s === 'submitted') return 'blue'
-  if (s === 'approved') return 'green'
-  if (s === 'cancelled') return 'red'
-  return 'gray'
 }

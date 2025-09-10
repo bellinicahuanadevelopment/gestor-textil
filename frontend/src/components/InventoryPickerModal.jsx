@@ -22,7 +22,8 @@ export default function InventoryPickerModal({
 
   const inputBg = useColorModeValue('blackAlpha.50','whiteAlpha.100')
   const inputBorder = useColorModeValue('blackAlpha.200','whiteAlpha.300')
-  const titleColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
+  const headerBg = useColorModeValue('white','gray.800')
+  const borderColor = useColorModeValue('blackAlpha.200','whiteAlpha.300')
   const compact = useBreakpointValue({ base: true, md: false })
 
   const [rows, setRows] = useState([])
@@ -145,52 +146,67 @@ export default function InventoryPickerModal({
     <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>
-          <HStack justify="space-between" align="center">
-            <Text>Seleccionar artículos</Text>
-            <HStack spacing="3" align="center">
-              <Text fontSize="sm" color="gray.500">Mantener abierto</Text>
-              <Switch
-                isChecked={keepOpen}
-                onChange={(e)=>onToggleKeepOpen(e.target.checked)}
-              />
+        {/* Sticky header with title, keep-open, search & page-size */}
+        <ModalHeader
+          bg={headerBg}
+          borderBottom="1px solid"
+          borderColor={borderColor}
+          sx={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 1,
+            borderTopLeftRadius: 'inherit',
+            borderTopRightRadius: 'inherit'
+          }}
+          pb="3"
+        >
+          <VStack align="stretch" spacing="3">
+            <HStack justify="space-between" align="center">
+              <Text fontWeight="semibold">Seleccionar artículos</Text>
+              <HStack spacing="3" align="center">
+                <Text fontSize="sm" color="gray.500">Mantener abierto</Text>
+                <Switch
+                  isChecked={keepOpen}
+                  onChange={(e)=>onToggleKeepOpen(e.target.checked)}
+                />
+              </HStack>
             </HStack>
-          </HStack>
+
+            <HStack align="center" spacing="3" flexWrap="wrap">
+              <InputGroup maxW={{ base: '100%', md: '560px' }}>
+                <InputLeftElement pointerEvents="none">
+                  <SearchIcon color="gray.400" />
+                </InputLeftElement>
+                <Input
+                  placeholder="Descripción, referencia o color"
+                  value={q}
+                  onChange={e=>{ setQ(e.target.value); setPage(1) }}
+                  variant="filled"
+                  bg={inputBg}
+                  borderColor={inputBorder}
+                  _hover={{ bg: inputBg }}
+                  _focus={{ bg: inputBg, borderColor: inputBorder }}
+                />
+              </InputGroup>
+              <Spacer />
+              <HStack>
+                <Text fontSize="sm" color="gray.500">Mostrar</Text>
+                <Select
+                  value={pageSize}
+                  onChange={e=>{ setPageSize(Number(e.target.value)); setPage(1) }}
+                  size="sm"
+                  w="84px"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                </Select>
+              </HStack>
+            </HStack>
+          </VStack>
         </ModalHeader>
 
         <ModalBody>
-          <HStack mb="4" align="center">
-            <InputGroup maxW="560px">
-              <InputLeftElement pointerEvents="none">
-                <SearchIcon color="gray.400" />
-              </InputLeftElement>
-              <Input
-                placeholder="Buscar por descripción, referencia o color"
-                value={q}
-                onChange={e=>setQ(e.target.value)}
-                variant="filled"
-                bg={inputBg}
-                borderColor={inputBorder}
-                _hover={{ bg: inputBg }}
-                _focus={{ bg: inputBg, borderColor: inputBorder }}
-              />
-            </InputGroup>
-            <Spacer />
-            <HStack>
-              <Text fontSize="sm" color="gray.500">Mostrar</Text>
-              <Select
-                value={pageSize}
-                onChange={e=>setPageSize(Number(e.target.value))}
-                size="sm"
-                w="72px"
-              >
-                <option value={5}>5</option>
-                <option value={10}>10</option>
-                <option value={15}>15</option>
-              </Select>
-            </HStack>
-          </HStack>
-
           <Stack spacing="4">
             {pageRows.map(p => {
               const available = availableFor(p)
@@ -203,7 +219,7 @@ export default function InventoryPickerModal({
                   <CardHeader pb="2">
                     <HStack justify="space-between" align="start">
                       <Box>
-                        <Heading size="lg" color={titleColor}>{p.descripcion}</Heading>
+                        <Heading size="lg">{p.descripcion}</Heading>
                         <Text fontSize="xs" color="gray.500">Ref: {p.referencia}</Text>
                       </Box>
                       <VStack spacing="0" align="flex-end">
@@ -213,7 +229,7 @@ export default function InventoryPickerModal({
                             <Badge colorScheme="green" rounded="md" ml="2">Agregado <CheckIcon ml="1" boxSize="2.5" /></Badge>
                           )}
                         </HStack>
-                        <Text fontSize="lg" fontWeight="bold" lineHeight="1">{available}</Text>
+                        <Text fontSize="lg" fontWeight="bold" fontFamily="mono" lineHeight="1">{available}</Text>
                       </VStack>
                     </HStack>
                   </CardHeader>
@@ -228,6 +244,7 @@ export default function InventoryPickerModal({
                           max={available}
                           onChange={(_,v)=>setQtyById(prev=>({...prev, [p.id]: isFinite(v)?v:0}))}
                           w="160px"
+                          fontFamily="mono"
                         >
                           <NumberInputField />
                           <NumberInputStepper>
@@ -318,7 +335,18 @@ export default function InventoryPickerModal({
           </HStack>
         </ModalBody>
 
-        <ModalFooter>
+        <ModalFooter
+          bg={headerBg}
+          borderTop="1px solid"
+          borderColor={borderColor}
+          sx={{
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 1,
+            borderBottomLeftRadius: 'inherit',
+            borderBottomRightRadius: 'inherit'
+          }}
+        >
           <Button variant="ghost" leftIcon={<CloseIcon boxSize="2.5" />} onClick={onClose}>
             Cerrar
           </Button>

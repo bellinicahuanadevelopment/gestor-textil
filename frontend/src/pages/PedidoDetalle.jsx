@@ -1,10 +1,10 @@
-import React, { useMemo, useState, useRef } from 'react'
+import React, { useMemo, useState, useRef, Suspense, lazy } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Card, CardBody, CardHeader, Button,
   IconButton, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper,
   NumberDecrementStepper, Spacer, Badge, Tabs, TabList, Tab, useColorModeValue,
-  useToast, Tooltip, useBreakpointValue, Divider, Skeleton, SkeletonText,
-  AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
+  useToast, Tooltip, useBreakpointValue, Divider, Skeleton,
+  SkeletonText, AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
   AlertDialogContent, AlertDialogOverlay, useDisclosure, usePrefersReducedMotion
 } from '@chakra-ui/react'
 import {
@@ -16,7 +16,9 @@ import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import InventoryPickerModal from '../components/InventoryPickerModal'
+
+// Lazy shared modal (same look/behavior as NuevoPedido; sticky controls)
+const InventoryPickerModal = lazy(() => import('../components/InventoryPickerModal'))
 
 function money(n){try{return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(Number(n||0))}catch{return `${n}`}}
 const fmtTime = (d)=> new Intl.DateTimeFormat('es-CO',{hour:'2-digit',minute:'2-digit'}).format(d)
@@ -36,6 +38,7 @@ export default function PedidoDetalle(){
   const [approving, setApproving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState(null) // confirm per-item delete
 
   const prefersReducedMotion = usePrefersReducedMotion()
   const smooth = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
@@ -44,6 +47,7 @@ export default function PedidoDetalle(){
   const { isOpen: adding, onOpen: openAdd, onClose: closeAdd } = useDisclosure()
   const cancelRef = useRef()
 
+  // Order (head + items)
   const {
     data: order,
     isLoading,
@@ -62,13 +66,16 @@ export default function PedidoDetalle(){
   const items = Array.isArray(order?.items) ? order.items : []
 
   const isApprover = ['manager', 'admin'].includes(user?.profile)
-  const isApproved = (status) => {
-    const s = String(status || '').toLowerCase()
-    return s === 'approved' || s === 'aprobado'
-  }
-  const isDraft = (status) => String(status||'').toLowerCase() === 'draft'
+  const isDraft = (s) => String(s||'').toLowerCase() === 'draft'
+  const isSubmitted = (s) => String(s||'').toLowerCase() === 'submitted'
+  const isApproved = (s) => String(s||'').toLowerCase() === 'approved' || String(s||'').toLowerCase() === 'aprobado'
   const canEdit = head && !isApproved(head.status)
 
+  // Action visibility (avoid two ✓ at once)
+  const showApprove = isApprover && head && isSubmitted(head.status)
+  const showSubmit  = !isApprover && head && isDraft(head.status)
+
+  // Cache patch helpers
   function patchOrder(fn){
     queryClient.setQueryData(['pedido', id], (old) => (old ? fn(old) : old))
   }
@@ -79,6 +86,7 @@ export default function PedidoDetalle(){
     })
   }
 
+  // Update existing item
   const updateItem = useMutation({
     mutationFn: async ({ itemId, fields }) => {
       return authedFetchJson(`/pedidos/${id}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(fields) })
@@ -99,6 +107,7 @@ export default function PedidoDetalle(){
     }
   })
 
+  // Remove existing item
   const removeItem = useMutation({
     mutationFn: async ({ itemId }) => authedFetchJson(`/pedidos/${id}/items/${itemId}`, { method:'DELETE' }),
     onMutate: async ({ itemId }) => {
@@ -123,6 +132,7 @@ export default function PedidoDetalle(){
     }
   })
 
+  // Approve (managers only; only when submitted)
   const approve = useMutation({
     mutationFn: async () => authedFetchJson(`/pedidos/${id}/approve`, { method:'POST' }),
     onMutate: async () => {
@@ -152,6 +162,7 @@ export default function PedidoDetalle(){
     }
   })
 
+  // Submit (non-approver; when draft)
   const submit = useMutation({
     mutationFn: async () => authedFetchJson(`/pedidos/${id}/submit`, { method:'POST' }),
     onMutate: async () => {
@@ -179,6 +190,7 @@ export default function PedidoDetalle(){
     }
   })
 
+  // Delete order
   const deleteOrder = useMutation({
     mutationFn: async () => authedFetchJson(`/pedidos/${id}`, { method:'DELETE' }),
     onMutate: () => setDeleting(true),
@@ -196,42 +208,69 @@ export default function PedidoDetalle(){
     }
   })
 
+  // Save all (handles both updates and newly-added drafts)
   async function saveAll(){
     if (dirtyIds.size === 0) return
     const snapshot = queryClient.getQueryData(['pedido', id])
+    const all = Array.isArray(snapshot?.items) ? snapshot.items : []
+
+    const toCreate = all.filter(i => i.__isNew && dirtyIds.has(i.id))
+    const toUpdate = all.filter(i => !i.__isNew && dirtyIds.has(i.id))
+
     try {
-      const dirty = (snapshot?.items || []).filter(i => dirtyIds.has(i.id))
-
-      const existing = dirty.filter(i => !String(i.id).startsWith('tmp-'))
-        .map(i => ({ itemId: i.id, fields: { cantidad: Number(i.cantidad||0), precio: Number(i.precio||0) } }))
-
-      const stagedNew = dirty.filter(i => String(i.id).startsWith('tmp-'))
-        .map(i => ({
-          body: {
-            producto_id: i.producto_id,
-            referencia: i.referencia,
-            cantidad: Number(i.cantidad||0),
-            precio: Number(i.precio||0)
-          }
-        }))
-
-      // PUT existing
-      await Promise.all(existing.map(s => updateItem.mutateAsync(s)))
-      // POST new
-      await Promise.all(stagedNew.map(s => authedFetchJson(`/pedidos/${id}/items`, {
-        method: 'POST',
-        body: JSON.stringify(s.body)
-      })))
-
+      await Promise.all([
+        ...toCreate.map(i =>
+          authedFetchJson(`/pedidos/${id}/items`, {
+            method:'POST',
+            body: JSON.stringify({ producto_id: i.producto_id, cantidad: Number(i.cantidad)||0, precio: Number(i.precio)||0 })
+          })
+        ),
+        ...toUpdate.map(i =>
+          authedFetchJson(`/pedidos/${id}/items/${i.id}`, {
+            method:'PUT',
+            body: JSON.stringify({ cantidad: Number(i.cantidad)||0, precio: Number(i.precio)||0 })
+          })
+        )
+      ])
       setDirtyIds(new Set())
-      toast({ status:'success', title:`Cambios guardados (${dirty.length})` })
-      await queryClient.invalidateQueries({ queryKey: ['pedido', id] })
-      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
+      toast({ status:'success', title:`Cambios guardados (${toCreate.length + toUpdate.length})` })
     } catch (err) {
       toast({ status:'error', title:'Error al guardar cambios', description:String(err?.message || err) })
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
     }
   }
 
+  // Draft add from picker (requires Guardar)
+  async function handleDraftAdd({ producto_id, referencia, cantidad }){
+    // fetch product info to display draft nicely (price/description)
+    let prod = null
+    try {
+      const list = await authedFetchJson('/inventario/resumen')
+      prod = Array.isArray(list) ? list.find(r => r.id === producto_id) : null
+    } catch {}
+    const precio = Number(prod?.precio_lista || 0)
+    const descripcion = prod?.descripcion || referencia || 'Nuevo ítem'
+
+    const tempId = `new:${producto_id}:${Date.now()}`
+    patchOrder((old) => {
+      const cur = Array.isArray(old?.items) ? old.items : []
+      const draft = {
+        id: tempId,
+        __isNew: true,
+        producto_id,
+        referencia,
+        descripcion,
+        cantidad: Number(cantidad)||0,
+        precio
+      }
+      return { ...old, items: [...cur, draft] }
+    })
+    setDirtyIds(prev => new Set(prev).add(tempId))
+  }
+
+  // ——— Look & feel
   const underline = useColorModeValue(`${accent}.500`, `${accent}.300`)
   const pillBg = useColorModeValue(`${accent}.50`, `${accent}.900`)
   const pillColor = useColorModeValue(`${accent}.700`, `${accent}.200`)
@@ -244,56 +283,25 @@ export default function PedidoDetalle(){
   const dirtyCount = dirtyIds.size
   const compact = useBreakpointValue({ base: true, md: false })
 
-  const showApprove = isApprover && head && !isApproved(head.status)
-  const showSubmit = !isApprover && head && isDraft(head.status)
-
+  // Single primary action (visual)
   const primary =
-    showApprove ? 'approve' :
     (dirtyCount > 0 ? 'save' :
-     (showSubmit ? 'submit' : null))
-
-  // Stage new items from inventory picker and mark them dirty (require Save)
-  function handleAddFromInventory(sel){
-    // Build a temp row; use referencia as fallback label
-    const tmpId = `tmp-${Math.random().toString(36).slice(2,9)}`
-    const staged = {
-      id: tmpId,
-      producto_id: sel.producto_id,
-      referencia: sel.referencia,
-      descripcion: sel.referencia,
-      cantidad: Number(sel.cantidad || 0),
-      precio: Number(sel.precio || 0)
-    }
-    patchOrder(old => ({ ...old, items: Array.isArray(old.items) ? [...old.items, staged] : [staged] }))
-    setDirtyIds(prev => {
-      const s = new Set(prev)
-      s.add(tmpId)
-      return s
-    })
-    toast({ status:'info', title:'Ítem agregado', description:'Pendiente de guardar' })
-  }
-
-  const showHeaderSkeleton = isLoading && !head
+      (showApprove ? 'approve' :
+        (showSubmit ? 'submit' : null)))
 
   return (
     <Box as="main">
+      {/* Title with skeleton for reference */}
       <Heading size="lg" mb="1" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
-        Pedido #{' '}
-        {showHeaderSkeleton ? (
-          <Skeleton as="span" display="inline-block" height="1em" width="64px" />
-        ) : (
-          head ? formatRef(head.id) : ''
-        )}
+        Pedido # {(!head || isLoading || isFetching)
+          ? <Skeleton as="span" display="inline-block" height="1.2em" width="88px" ml="1" />
+          : formatRef(head.id)}
       </Heading>
 
-      {showHeaderSkeleton ? (
-        <HStack spacing="3" mb="3" align="center">
-          <Skeleton height="16px" width="220px" />
-          <Skeleton height="16px" width="260px" />
-          <Skeleton height="16px" width="160px" />
-          <Skeleton height="20px" width="80px" rounded="full" />
-        </HStack>
-      ) : head && (
+      {/* Client line with skeleton */}
+      {(!head || isLoading || isFetching) ? (
+        <SkeletonText noOfLines={1} maxW="560px" mt="2" mb="3" />
+      ) : (
         <Text fontSize="sm" color={muted} mb="3" lineHeight="1.45">
           {head.cliente_nombre} • {head.direccion_entrega} • Entrega: {head.fecha_entrega}
           <Badge
@@ -315,6 +323,7 @@ export default function PedidoDetalle(){
         </Text>
       )}
 
+      {/* Top bar */}
       <Stack
         direction={{ base: 'column', md: 'row' }}
         align={{ base: 'stretch', md: 'center' }}
@@ -332,7 +341,7 @@ export default function PedidoDetalle(){
               aria-label="Volver a pedidos"
               icon={<ArrowBackIcon />}
               size="sm"
-              variant="ghost"
+              variant="outline"
               onClick={() => navigate('/pedidos')}
             />
           </Tooltip>
@@ -345,147 +354,77 @@ export default function PedidoDetalle(){
           </Tabs>
         </HStack>
 
+        {/* Right side: only submit lives here */}
         <HStack spacing="2" justify="flex-end">
           {showSubmit && (
-            <Tooltip label="Enviar pedido">
-              {compact ? (
-                <IconButton
-                  aria-label="Enviar pedido"
-                  icon={<CheckIcon />}
-                  colorScheme={accent}
-                  variant={primary === 'submit' ? 'solid' : 'outline'}
-                  onClick={() => submit.mutate()}
-                  isDisabled={submitting}
-                  isLoading={submitting}
-                  size="sm"
-                />
-              ) : (
-                <Button
-                  leftIcon={<CheckIcon />}
-                  colorScheme={accent}
-                  variant={primary === 'submit' ? 'solid' : 'outline'}
-                  onClick={() => submit.mutate()}
-                  isDisabled={submitting}
-                  isLoading={submitting}
-                  size="sm"
-                >
-                  Enviar
-                </Button>
-              )}
-            </Tooltip>
+            <Button
+              leftIcon={<CheckIcon />}
+              colorScheme={accent}
+              variant={primary === 'submit' ? 'solid' : 'outline'}
+              onClick={() => submit.mutate()}
+              isDisabled={submitting}
+              isLoading={submitting}
+              size="sm"
+            >
+              Enviar
+            </Button>
           )}
         </HStack>
       </Stack>
 
       <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
-        <HStack justify="flex-end" mb="2" spacing="2">
-          <Tooltip label={dirtyCount ? `Guardar cambios (${dirtyCount})` : (canEdit ? 'Nada por guardar' : 'Pedido aprobado')}>
-            {compact ? (
-              <IconButton
-                aria-label="Guardar cambios"
-                icon={<FiSave />}
-                colorScheme={accent}
-                onClick={saveAll}
-                isDisabled={!canEdit || dirtyCount === 0}
-                isLoading={updateItem.isPending}
-                size="sm"
-                variant={primary === 'save' ? 'solid' : 'outline'}
-              />
-            ) : (
+        {/* Actions: left = Add; right = Save/Delete/Approve */}
+        <HStack justify="space-between" mb="2">
+          <Button
+            leftIcon={<AddIcon />}
+            colorScheme={accent}
+            onClick={openAdd}
+            isDisabled={!canEdit}
+            variant="outline"
+            size="sm"
+          >
+            Agregar ítem
+          </Button>
+
+          <HStack spacing="2">
+            <Button
+              leftIcon={<FiSave />}
+              colorScheme={accent}
+              onClick={saveAll}
+              isDisabled={!canEdit || dirtyCount === 0}
+              isLoading={false}
+              variant={primary === 'save' ? 'solid' : 'outline'}
+              size="sm"
+            >
+              Guardar{dirtyCount ? ` (${dirtyCount})` : ''}
+            </Button>
+
+            <Button
+              leftIcon={<DeleteIcon />}
+              colorScheme="red"
+              variant="outline"
+              onClick={openDelete}
+              isDisabled={!canEdit || deleting}
+              isLoading={deleting}
+              size="sm"
+            >
+              Eliminar
+            </Button>
+
+            {showApprove && (
               <Button
-                leftIcon={<FiSave />}
+                leftIcon={<CheckIcon />}
                 colorScheme={accent}
-                onClick={saveAll}
-                isDisabled={!canEdit || dirtyCount === 0}
-                isLoading={updateItem.isPending}
-                variant={primary === 'save' ? 'solid' : 'outline'}
+                variant={primary === 'approve' ? 'solid' : 'outline'}
+                onClick={() => approve.mutate()}
+                isDisabled={approving}
+                isLoading={approving}
                 size="sm"
               >
-                Guardar{dirtyCount ? ` (${dirtyCount})` : ''}
+                Aprobar
               </Button>
             )}
-          </Tooltip>
-
-          <Tooltip label={canEdit ? 'Eliminar pedido' : 'No se puede eliminar un pedido aprobado'}>
-            {compact ? (
-              <IconButton
-                aria-label="Eliminar pedido"
-                icon={<DeleteIcon />}
-                colorScheme="red"
-                variant="outline"
-                onClick={openDelete}
-                isDisabled={!canEdit || deleting}
-                isLoading={deleting}
-                size="sm"
-              />
-            ) : (
-              <Button
-                leftIcon={<DeleteIcon />}
-                colorScheme="red"
-                variant="outline"
-                onClick={openDelete}
-                isDisabled={!canEdit || deleting}
-                isLoading={deleting}
-                size="sm"
-              >
-                Eliminar
-              </Button>
-            )}
-          </Tooltip>
-
-          <Tooltip label={canEdit ? 'Agregar ítem' : 'Pedido aprobado'}>
-            {compact ? (
-              <IconButton
-                aria-label="Agregar ítem"
-                icon={<AddIcon />}
-                colorScheme={accent}
-                onClick={openAdd}
-                isDisabled={!canEdit}
-                size="sm"
-                variant="outline"
-              />
-            ) : (
-              <Button
-                leftIcon={<AddIcon />}
-                colorScheme={accent}
-                onClick={openAdd}
-                isDisabled={!canEdit}
-                variant="outline"
-                size="sm"
-              >
-                Agregar ítem
-              </Button>
-            )}
-          </Tooltip>
-
-          {showApprove && (
-            <Tooltip label="Aprobar pedido">
-              {compact ? (
-                <IconButton
-                  aria-label="Aprobar pedido"
-                  icon={<CheckIcon />}
-                  colorScheme={accent}
-                  variant={primary === 'approve' ? 'solid' : 'outline'}
-                  onClick={() => approve.mutate()}
-                  isDisabled={approving}
-                  isLoading={approving}
-                  size="sm"
-                />
-              ) : (
-                <Button
-                  leftIcon={<CheckIcon />}
-                  colorScheme={accent}
-                  variant={primary === 'approve' ? 'solid' : 'outline'}
-                  onClick={() => approve.mutate()}
-                  isDisabled={approving}
-                  isLoading={approving}
-                  size="sm"
-                >
-                  Aprobar
-                </Button>
-              )}
-            </Tooltip>
-          )}
+          </HStack>
         </HStack>
 
         <Divider my="3" />
@@ -536,20 +475,24 @@ export default function PedidoDetalle(){
                       size="sm"
                       variant="outline"
                       colorScheme="red"
-                      onClick={()=>removeItem.mutate({ itemId: it.id })}
+                      onClick={()=> setRemoveTarget(it)}
                       isDisabled={!canEdit}
                     />
                   </HStack>
                 </CardHeader>
                 <CardBody pt="2">
-                  <HStack spacing="6" align="end" wrap="wrap">
+                  <Stack
+                    direction={{ base: 'column', md: 'row' }}
+                    align={{ base: 'stretch', md: 'end' }}
+                    spacing="6"
+                  >
                     <Box>
                       <Text fontSize="md" color={muted} mb="1">Cantidad</Text>
                       <NumberInput
                         value={it.cantidad}
                         min={0}
-                        precision={2}
                         step={1}
+                        precision={0}
                         onChange={(_,v)=>{
                           const val = Number.isFinite(v)?v:0
                           patchItemInCache(it.id, { cantidad: val })
@@ -562,7 +505,7 @@ export default function PedidoDetalle(){
                           textAlign="right"
                           fontFamily="mono"
                           sx={{ fontVariantNumeric: 'tabular-nums' }}
-                          inputMode="decimal"
+                          inputMode="numeric"
                           aria-label="Cantidad"
                         />
                         <NumberInputStepper>
@@ -578,6 +521,7 @@ export default function PedidoDetalle(){
                         value={it.precio}
                         min={0}
                         step={1000}
+                        precision={0}
                         onChange={(_,v)=>{
                           const val = Number.isFinite(v)?v:0
                           patchItemInCache(it.id, { precio: val })
@@ -590,7 +534,7 @@ export default function PedidoDetalle(){
                           textAlign="right"
                           fontFamily="mono"
                           sx={{ fontVariantNumeric: 'tabular-nums' }}
-                          inputMode="decimal"
+                          inputMode="numeric"
                           aria-label="Precio"
                         />
                         <NumberInputStepper>
@@ -600,15 +544,18 @@ export default function PedidoDetalle(){
                       </NumberInput>
                     </Box>
 
-                    <Spacer />
-
-                    <Box textAlign="right" minW="160px">
+                    <Box
+                      textAlign="right"
+                      minW="160px"
+                      ml={{ md: 'auto' }}
+                      alignSelf={{ base: 'flex-end', md: 'auto' }}
+                    >
                       <Text fontSize="md" color={muted}>Subtotal</Text>
                       <Text fontWeight="semibold" fontFamily="mono" sx={{ fontVariantNumeric: 'tabular-nums' }}>
                         {money((Number(it.cantidad)||0)*(Number(it.precio)||0))}
                       </Text>
                     </Box>
-                  </HStack>
+                  </Stack>
                 </CardBody>
               </Card>
             ))}
@@ -622,16 +569,64 @@ export default function PedidoDetalle(){
         )}
       </Box>
 
-      {/* Inventory Picker (replaces the old AddItemModal) */}
-      <InventoryPickerModal
-        isOpen={adding}
-        onClose={closeAdd}
-        onAdd={handleAddFromInventory}
-        orderItems={items}
-        pedidoId={id}
-        defaultQty={0}
-      />
+      {/* Shared sticky-header picker — same look as NuevoPedido.
+          Here it only drafts locally; user must Guardar. */}
+      <Suspense fallback={null}>
+        <InventoryPickerModal
+          isOpen={adding}
+          onClose={closeAdd}
+          onAdd={handleDraftAdd}
+          pedidoId={id}
+        />
+      </Suspense>
 
+      {/* Confirm per-item delete */}
+      <AlertDialog
+        isOpen={!!removeTarget}
+        leastDestructiveRef={undefined}
+        onClose={()=>setRemoveTarget(null)}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Eliminar ítem
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              ¿Seguro que deseas eliminar “{removeTarget?.descripcion}” del pedido?
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button variant="outline" onClick={()=>setRemoveTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                colorScheme="red"
+                ml={3}
+                onClick={()=>{
+                  if (!removeTarget) return
+                  if (String(removeTarget.id).startsWith('new:')) {
+                    // Just remove the draft from cache
+                    patchOrder((old) => {
+                      const cur = Array.isArray(old?.items) ? old.items : []
+                      return { ...old, items: cur.filter(r => r.id !== removeTarget.id) }
+                    })
+                    setDirtyIds(prev => {
+                      const n = new Set(prev); n.delete(removeTarget.id); return n
+                    })
+                    setRemoveTarget(null)
+                    return
+                  }
+                  removeItem.mutate({ itemId: removeTarget.id })
+                  setRemoveTarget(null)
+                }}
+              >
+                Eliminar
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+
+      {/* Delete order confirm */}
       <AlertDialog
         isOpen={isDeleteOpen}
         leastDestructiveRef={cancelRef}

@@ -3,14 +3,12 @@ import {
   Box, Heading, Text, Stack, HStack, VStack, Card, CardBody, CardHeader, Button,
   IconButton, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper,
   NumberDecrementStepper, Spacer, Badge, Tabs, TabList, Tab, useColorModeValue,
-  useToast, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter,
-  Input, InputGroup, InputLeftElement, Tooltip, useBreakpointValue, Divider, Skeleton,
-  SkeletonText, AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
+  useToast, Tooltip, useBreakpointValue, Divider, Skeleton, SkeletonText,
+  AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
   AlertDialogContent, AlertDialogOverlay, useDisclosure, usePrefersReducedMotion
 } from '@chakra-ui/react'
 import {
-  ArrowBackIcon, DeleteIcon, AddIcon, SearchIcon, CheckIcon,
-  ChevronLeftIcon, ChevronRightIcon
+  ArrowBackIcon, DeleteIcon, AddIcon, CheckIcon
 } from '@chakra-ui/icons'
 import { FiSave } from 'react-icons/fi'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -202,13 +200,33 @@ export default function PedidoDetalle(){
     if (dirtyIds.size === 0) return
     const snapshot = queryClient.getQueryData(['pedido', id])
     try {
-      const toSave = (snapshot?.items || []).filter(i => dirtyIds.has(i.id)).map(i => ({
-        id: i.id,
-        body: { cantidad: Number(i.cantidad), precio: Number(i.precio) }
-      }))
-      await Promise.all(toSave.map(s => updateItem.mutateAsync({ itemId: s.id, fields: s.body })))
+      const dirty = (snapshot?.items || []).filter(i => dirtyIds.has(i.id))
+
+      const existing = dirty.filter(i => !String(i.id).startsWith('tmp-'))
+        .map(i => ({ itemId: i.id, fields: { cantidad: Number(i.cantidad||0), precio: Number(i.precio||0) } }))
+
+      const stagedNew = dirty.filter(i => String(i.id).startsWith('tmp-'))
+        .map(i => ({
+          body: {
+            producto_id: i.producto_id,
+            referencia: i.referencia,
+            cantidad: Number(i.cantidad||0),
+            precio: Number(i.precio||0)
+          }
+        }))
+
+      // PUT existing
+      await Promise.all(existing.map(s => updateItem.mutateAsync(s)))
+      // POST new
+      await Promise.all(stagedNew.map(s => authedFetchJson(`/pedidos/${id}/items`, {
+        method: 'POST',
+        body: JSON.stringify(s.body)
+      })))
+
       setDirtyIds(new Set())
-      toast({ status:'success', title:`Cambios guardados (${toSave.length})` })
+      toast({ status:'success', title:`Cambios guardados (${dirty.length})` })
+      await queryClient.invalidateQueries({ queryKey: ['pedido', id] })
+      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
     } catch (err) {
       toast({ status:'error', title:'Error al guardar cambios', description:String(err?.message || err) })
     }
@@ -234,12 +252,48 @@ export default function PedidoDetalle(){
     (dirtyCount > 0 ? 'save' :
      (showSubmit ? 'submit' : null))
 
+  // Stage new items from inventory picker and mark them dirty (require Save)
+  function handleAddFromInventory(sel){
+    // Build a temp row; use referencia as fallback label
+    const tmpId = `tmp-${Math.random().toString(36).slice(2,9)}`
+    const staged = {
+      id: tmpId,
+      producto_id: sel.producto_id,
+      referencia: sel.referencia,
+      descripcion: sel.referencia,
+      cantidad: Number(sel.cantidad || 0),
+      precio: Number(sel.precio || 0)
+    }
+    patchOrder(old => ({ ...old, items: Array.isArray(old.items) ? [...old.items, staged] : [staged] }))
+    setDirtyIds(prev => {
+      const s = new Set(prev)
+      s.add(tmpId)
+      return s
+    })
+    toast({ status:'info', title:'Ítem agregado', description:'Pendiente de guardar' })
+  }
+
+  const showHeaderSkeleton = isLoading && !head
+
   return (
     <Box as="main">
       <Heading size="lg" mb="1" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
-        Pedido #{head ? formatRef(head.id) : ''}
+        Pedido #{' '}
+        {showHeaderSkeleton ? (
+          <Skeleton as="span" display="inline-block" height="1em" width="64px" />
+        ) : (
+          head ? formatRef(head.id) : ''
+        )}
       </Heading>
-      {head && (
+
+      {showHeaderSkeleton ? (
+        <HStack spacing="3" mb="3" align="center">
+          <Skeleton height="16px" width="220px" />
+          <Skeleton height="16px" width="260px" />
+          <Skeleton height="16px" width="160px" />
+          <Skeleton height="20px" width="80px" rounded="full" />
+        </HStack>
+      ) : head && (
         <Text fontSize="sm" color={muted} mb="3" lineHeight="1.45">
           {head.cliente_nombre} • {head.direccion_entrega} • Entrega: {head.fecha_entrega}
           <Badge
@@ -278,7 +332,7 @@ export default function PedidoDetalle(){
               aria-label="Volver a pedidos"
               icon={<ArrowBackIcon />}
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => navigate('/pedidos')}
             />
           </Tooltip>
@@ -568,12 +622,14 @@ export default function PedidoDetalle(){
         )}
       </Box>
 
-      <AddItemModal
+      {/* Inventory Picker (replaces the old AddItemModal) */}
+      <InventoryPickerModal
         isOpen={adding}
         onClose={closeAdd}
-        pedidoId={id}
+        onAdd={handleAddFromInventory}
         orderItems={items}
-        lock={!canEdit}
+        pedidoId={id}
+        defaultQty={0}
       />
 
       <AlertDialog
@@ -635,224 +691,5 @@ function AccentTab({ label, count=0, underline, pillBg, pillColor, disabled=fals
         </Badge>
       </HStack>
     </Tab>
-  )
-}
-
-/* Item picker modal (controlled from parent) */
-function AddItemModal({ isOpen, onClose, pedidoId, orderItems = [], lock=false }){
-  const authedFetchJson = useAuthedFetchJson()
-  const queryClient = useQueryClient()
-  const { prefs } = useThemePrefs()
-  const accent = prefs?.accent || 'teal'
-  const [q,setQ] = useState('')
-  const [page,setPage] = useState(1)
-  const [pageSize,setPageSize] = useState(5)
-  const [qtyById,setQtyById] = useState({})
-
-  const inputBg = useColorModeValue('blackAlpha.50','whiteAlpha.100')
-  const inputBorder = useColorModeValue('blackAlpha.200','whiteAlpha.300')
-
-  const inThisOrder = useMemo(() => {
-    const m = {}
-    for (const it of orderItems) {
-      if (!it.producto_id) continue
-      m[it.producto_id] = (m[it.producto_id] || 0) + Number(it.cantidad || 0)
-    }
-    return m
-  }, [orderItems])
-
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ['inventario','resumen',{ pedidoId }],
-    queryFn: () => authedFetchJson(`/inventario/resumen?pedido_id=${pedidoId}`),
-    enabled: isOpen,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-    staleTime: 0
-  })
-
-  const addItem = useMutation({
-    mutationFn: async ({ producto_id, cantidad, precio }) => {
-      return authedFetchJson(`/pedidos/${pedidoId}/items`, {
-        method: 'POST',
-        body: JSON.stringify({ producto_id, cantidad, precio })
-      })
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
-      await queryClient.invalidateQueries({ queryKey: ['inventario'] })
-      onClose()
-    }
-  })
-
-  const fold = (v)=> (v??'').toString().normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()
-  const filtered = useMemo(()=>{
-    const s = fold(q); if(!s) return rows
-    return rows.filter(p=> fold(p.descripcion).includes(s) || fold(p.referencia).includes(s) || fold(p?.caracteristicas?.color).includes(s))
-  },[rows,q])
-
-  const total = filtered.length
-  const totalPages = Math.max(1, Math.ceil(total/pageSize))
-  const safePage = Math.min(page,totalPages)
-  const start = (safePage-1)*pageSize
-  const pageRows = filtered.slice(start, start+pageSize)
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>Agregar ítems</ModalHeader>
-        <ModalBody>
-          <HStack mb="4" align="center">
-            <InputGroup maxW="560px">
-              <InputLeftElement pointerEvents="none">
-                <SearchIcon color="gray.400" />
-              </InputLeftElement>
-              <Input
-                placeholder="Buscar por descripción, referencia o color"
-                value={q}
-                onChange={e=>{ setQ(e.target.value); setPage(1) }}
-                variant="filled"
-                bg={inputBg}
-                borderColor={inputBorder}
-                _hover={{ bg: inputBg }}
-                _focus={{ bg: inputBg, borderColor: inputBorder }}
-              />
-            </InputGroup>
-            <Spacer />
-            <HStack>
-              <Text fontSize="sm" color="gray.500">Mostrar</Text>
-              <select
-                aria-label="Cantidad de resultados por página"
-                value={pageSize}
-                onChange={e=>{ setPageSize(Number(e.target.value)); setPage(1) }}
-                style={{ border: '1px solid var(--chakra-colors-gray-200)', borderRadius: 6, padding: '6px 8px' }}
-              >
-                <option value={5}>5</option><option value={10}>10</option><option value={15}>15</option>
-              </select>
-            </HStack>
-          </HStack>
-
-          <Stack spacing="4">
-            {(isLoading ? Array.from({ length: 3 }) : pageRows).map((p, idx) => {
-              if (isLoading) {
-                return (
-                  <Card key={`sk-${idx}`} variant="outline">
-                    <CardHeader pb="2">
-                      <HStack justify="space-between" align="start">
-                        <Box w="full">
-                          <Skeleton height="24px" maxW="240px" />
-                          <SkeletonText mt="2" noOfLines={1} maxW="200px" />
-                        </Box>
-                        <Skeleton height="24px" width="80px" />
-                      </HStack>
-                    </CardHeader>
-                    <CardBody pt="2">
-                      <SkeletonText noOfLines={2} />
-                    </CardBody>
-                  </Card>
-                )
-              }
-
-              const base = Number((p.cantidad_disponible ?? p.cantidad_actual ?? 0))
-              const mine = Number(inThisOrder[p.id] || 0)
-              const available = Math.max(0, base - mine)
-
-              return (
-                <Card key={p.id} variant="outline">
-                  <CardHeader pb="2">
-                    <HStack justify="space-between" align="start">
-                      <Box>
-                        <Heading size="lg" color={useColorModeValue('gray.800','gray.100')} lineHeight="1.2">
-                          {p.descripcion}
-                        </Heading>
-                        <Text fontSize="xs" color="gray.500">Ref: {p.referencia}</Text>
-                      </Box>
-                      <VStack spacing="0" align="flex-end" minW="96px">
-                        <Text fontSize="xs" color="gray.500">Disponible</Text>
-                        <Text
-                          fontWeight="semibold"
-                          fontFamily="mono"
-                          sx={{ fontVariantNumeric: 'tabular-nums' }}
-                        >
-                          {available}
-                        </Text>
-                      </VStack>
-                    </HStack>
-                  </CardHeader>
-                  <CardBody pt="2">
-                    <HStack justify="space-between" align="end">
-                      <Box>
-                        <Text fontSize="xs" color="gray.500" mb="1">Cantidad</Text>
-                        <NumberInput
-                          value={qtyById[p.id] ?? 0}
-                          min={0}
-                          max={available}
-                          onChange={(_,v)=>setQtyById(prev=>({...prev, [p.id]: Number.isFinite(v)?v:0}))}
-                          w="160px"
-                          isDisabled={lock}
-                        >
-                          <NumberInputField
-                            textAlign="right"
-                            fontFamily="mono"
-                            sx={{ fontVariantNumeric: 'tabular-nums' }}
-                            inputMode="decimal"
-                            aria-label={`Cantidad para ${p.descripcion}`}
-                          />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </Box>
-                      <Button
-                        leftIcon={<AddIcon />}
-                        colorScheme={accent}
-                        onClick={()=>{
-                          let cantidad = Number(qtyById[p.id] || 0)
-                          if (cantidad <= 0) return
-                          if (cantidad > available) cantidad = available
-                          const precio = Number(p.precio_lista || 0)
-                          addItem.mutate({ producto_id: p.id, cantidad, precio })
-                        }}
-                        isDisabled={available<=0 || lock}
-                      >
-                        Agregar
-                      </Button>
-                    </HStack>
-                  </CardBody>
-                </Card>
-              )
-            })}
-          </Stack>
-
-          {!isLoading && (
-            <HStack mt="4" justify="center" spacing="6">
-              <IconButton
-                aria-label="Página anterior"
-                icon={<ChevronLeftIcon />}
-                variant="outline"
-                size="sm"
-                isDisabled={safePage <= 1}
-                onClick={()=>setPage(p=>Math.max(1, p-1))}
-              />
-              <Text fontSize="sm" color="gray.600">
-                Página {safePage} de {totalPages}
-              </Text>
-              <IconButton
-                aria-label="Página siguiente"
-                icon={<ChevronRightIcon />}
-                variant="outline"
-                size="sm"
-                isDisabled={safePage >= totalPages}
-                onClick={()=>setPage(p=>Math.min(totalPages, p+1))}
-              />
-            </HStack>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button onClick={onClose}>Cerrar</Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
   )
 }

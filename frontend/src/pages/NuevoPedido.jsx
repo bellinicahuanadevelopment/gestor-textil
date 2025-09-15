@@ -2,14 +2,14 @@ import React, { useRef, useState, Suspense, lazy, useEffect } from 'react'
 import {
   Box, Heading, Text, Stack, HStack, VStack, Input, Button,
   FormControl, FormLabel, Card, CardHeader, CardBody,
-  NumberInput, NumberInputField, useDisclosure, useToast,
-  useColorModeValue, useBreakpointValue, useToken, IconButton, Spacer,
+  NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper,
+  useDisclosure, useToast, useColorModeValue, useBreakpointValue, IconButton, Spacer,
   Skeleton, SkeletonText, AlertDialog, AlertDialogBody, AlertDialogFooter,
   AlertDialogHeader, AlertDialogContent, AlertDialogOverlay, usePrefersReducedMotion
 } from '@chakra-ui/react'
 import {
   CheckIcon, ArrowBackIcon, ArrowForwardIcon, AddIcon,
-  DownloadIcon, EmailIcon
+  DownloadIcon, EmailIcon, DeleteIcon
 } from '@chakra-ui/icons'
 import { useAuthedFetchJson } from '../lib/api'
 import { useThemePrefs } from '../theme/ThemeContext'
@@ -55,20 +55,11 @@ function Stepper({ step, accent }) {
   const dotSize = useBreakpointValue({ base: '6', sm: '7', md: '8' })
   const labelSize = useBreakpointValue({ base: 'xs', sm: 'sm', md: 'md' })
   const gap = useBreakpointValue({ base: 2, sm: 3, md: 4 })
-  const dotSizeCss = useToken('sizes', dotSize)
 
   const labels = [1, 2, 3]
 
   return (
-    <HStack
-      as="nav"
-      aria-label="Progreso del pedido"
-      w="full"
-      align="center"
-      spacing={gap}
-      mb={4}
-      role="list"
-    >
+    <HStack as="nav" aria-label="Progreso del pedido" w="full" align="center" spacing={gap} mb={4} role="list">
       {labels.map((index) => {
         const isDone = index < step
         const isActive = index === step
@@ -125,8 +116,6 @@ export default function NuevoPedido() {
   const [step, setStep] = useState(1)
   const [pedidoId, setPedidoId] = useState(null)
 
-  const [flashId, setFlashId] = useState(null) // can be item.id or producto_id
-
   const headingRef = useRef(null)
   const prefersReducedMotion = usePrefersReducedMotion()
   const smooth = prefersReducedMotion ? 'none' : 'box-shadow 200ms ease, border-color 200ms ease'
@@ -145,6 +134,13 @@ export default function NuevoPedido() {
   useEffect(() => {
     if (headingRef.current) headingRef.current.focus()
   }, [step])
+
+  // Tokens to match PedidoDetalle
+  const headingColor = useColorModeValue('gray.800', 'gray.100')
+  const muted = useColorModeValue('gray.600', 'gray.400')
+  const hoverBg = useColorModeValue('blackAlpha.200', 'whiteAlpha.400')
+  const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
 
   // -------- Query: order details (items, etc.) --------
   const {
@@ -205,17 +201,17 @@ export default function NuevoPedido() {
         })
       })
     },
-    onSuccess: async (_res, vars) => {
-      setFlashId(vars.producto_id)
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
       await queryClient.invalidateQueries({ queryKey: ['inventario'] })
-      toast({ title: 'Ítem agregado', status: 'success' })
+      toast({ title: 'Artículo agregado', status: 'success' })
     },
     onError: (err) => {
       toast({ title: 'No se pudo agregar', description: String(err?.message || err), status: 'error' })
     }
   })
 
+  // IMPORTANT: do not invalidate the whole order after an inline update.
   const updateItem = useMutation({
     mutationFn: async ({ itemId, fields }) => {
       return authedFetchJson(`/pedidos/${pedidoId}/items/${itemId}`, {
@@ -233,10 +229,7 @@ export default function NuevoPedido() {
       if (ctx?.previous) queryClient.setQueryData(['pedido', pedidoId], ctx.previous)
       toast({ title: 'No se pudo actualizar', description: String(err?.message || err), status: 'error' })
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['pedido', pedidoId] })
-      queryClient.invalidateQueries({ queryKey: ['inventario'] })
-    }
+    // no onSettled invalidate — prevents the list from flashing/skeleton
   })
 
   const removeItem = useMutation({
@@ -290,7 +283,7 @@ export default function NuevoPedido() {
       <Heading
         ref={headingRef}
         tabIndex={-1}
-        size="lg"
+        size="xl"
         mb="4"
         lineHeight="1.2"
         letterSpacing="-0.02em"
@@ -401,12 +394,15 @@ export default function NuevoPedido() {
               }}
             />
           </FormControl>
-
+          
           <FormControl isRequired>
-            <FormLabel>Teléfono de contacto</FormLabel>
+            <FormLabel>Teléfono</FormLabel>
             <Input
               variant="filled"
               value={form.cliente_telefono}
+              bg={inputBg}
+              _hover={{ bg: hoverBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
               onChange={e => setForm(f => ({ ...f, cliente_telefono: e.target.value }))}
               inputMode="tel"
             />
@@ -417,6 +413,9 @@ export default function NuevoPedido() {
             <Input
               variant="filled"
               value={form.direccion_entrega}
+              bg={inputBg}
+              _hover={{ bg: hoverBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
               onChange={e => setForm(f => ({ ...f, direccion_entrega: e.target.value }))}
             />
           </FormControl>
@@ -427,6 +426,9 @@ export default function NuevoPedido() {
               variant="filled"
               type="date"
               value={form.fecha_entrega}
+              bg={inputBg}
+              _hover={{ bg: hoverBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
               onChange={e => setForm(f => ({ ...f, fecha_entrega: e.target.value }))}
             />
           </FormControl>
@@ -435,16 +437,8 @@ export default function NuevoPedido() {
 
       {step === 2 && (
         <Box>
+          {/* keep ONLY the text button */}
           <HStack mb="4" justify="flex-end">
-            <IconButton
-              aria-label="Añadir artículo"
-              icon={<AddIcon />}
-              colorScheme={accent}
-              onClick={picker.onOpen}
-              display={{ base: 'inline-flex', md: 'none' }}
-              size="md"
-              variant="outline"
-            />
             <Button
               colorScheme={accent}
               leftIcon={<AddIcon />}
@@ -487,34 +481,55 @@ export default function NuevoPedido() {
                   <Card
                     key={it.id}
                     variant="outline"
-                    w="full"
+                    bg="white"
+                    _dark={{ bg: 'gray.800' }}
                     _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
-                    sx={flashId && (flashId === it.id || flashId === it.producto_id) ? {
-                      boxShadow: '0 0 0 2px var(--chakra-colors-green-300)',
-                      transition: prefersReducedMotion ? 'none' : 'box-shadow 200ms ease'
-                    } : { transition: smooth }}
+                    sx={{ transition: smooth }}
                   >
                     <CardHeader pb="2">
                       <HStack justify="space-between" align="start">
                         <Box>
-                          <Heading size="lg" lineHeight="1.2" letterSpacing="-0.01em">{it.descripcion}</Heading>
-                          <Text fontSize="sm" color="gray.500" lineHeight="1.45">Ref: {it.referencia}</Text>
+                          <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.01em">
+                            {it.descripcion}
+                          </Heading>
+                          <Text fontSize="sm" color={muted}>Ref: {it.referencia}</Text>
                         </Box>
-                        <Box textAlign="right" minW="100px">
-                          <Text fontSize="sm" color="gray.500" mb="1">Cantidad</Text>
+                        <IconButton
+                          aria-label="Eliminar artículo"
+                          icon={<DeleteIcon />}
+                          size="sm"
+                          variant="outline"
+                          colorScheme="red"
+                          onClick={() => setRemoveTarget(it)}
+                        />
+                      </HStack>
+                    </CardHeader>
+
+                    <CardBody pt="2">
+                      <Stack
+                        direction={{ base: 'column', md: 'row' }}
+                        align={{ base: 'stretch', md: 'end' }}
+                        spacing="2"
+                      >
+                        <Box>
+                          <Text fontSize="md" color={muted} mb="1">Cantidad</Text>
                           <NumberInput
-                            size="sm"
                             value={Number(it.cantidad) || 0}
-                            min={1}
+                            min={0}
+                            step={1}
+                            precision={0}
                             onChange={(_, valNum) => {
-                              const v = Number.isFinite(valNum) ? valNum : Number(it.cantidad) || 1
+                              const v = Number.isFinite(valNum) ? valNum : Number(it.cantidad) || 0
                               patchItemInCache(it.id, { cantidad: v })
                             }}
                             onBlur={(e) => {
                               const v = Number(e.target.value)
-                              updateItem.mutate({ itemId: it.id, fields: { cantidad: Number.isFinite(v) ? v : Number(it.cantidad) || 1 } })
+                              updateItem.mutate({
+                                itemId: it.id,
+                                fields: { cantidad: Number.isFinite(v) ? v : Number(it.cantidad) || 0 }
+                              })
                             }}
-                            w="120px"
+                            maxW="160px"
                           >
                             <NumberInputField
                               textAlign="right"
@@ -523,49 +538,59 @@ export default function NuevoPedido() {
                               inputMode="numeric"
                               aria-label={`Cantidad para ${it.descripcion}`}
                             />
+                            <NumberInputStepper>
+                              <NumberIncrementStepper />
+                              <NumberDecrementStepper />
+                            </NumberInputStepper>
                           </NumberInput>
                         </Box>
-                      </HStack>
-                    </CardHeader>
 
-                    <CardBody pt="2">
-                      <HStack justify="space-between" align="center" wrap="wrap">
-                        <HStack>
-                          <Text fontSize="sm" color="gray.500">Precio</Text>
+                        <Box>
+                          <Text fontSize="md" color={muted} mb="1">Precio</Text>
                           <NumberInput
-                            size="sm"
                             value={Number(it.precio) || 0}
                             min={0}
+                            step={1000}
+                            precision={0}
                             onChange={(_, valNum) => {
                               const v = Number.isFinite(valNum) ? valNum : Number(it.precio) || 0
                               patchItemInCache(it.id, { precio: v })
                             }}
                             onBlur={(e) => {
                               const v = Number(e.target.value)
-                              updateItem.mutate({ itemId: it.id, fields: { precio: Number.isFinite(v) ? v : Number(it.precio) || 0 } })
+                              updateItem.mutate({
+                                itemId: it.id,
+                                fields: { precio: Number.isFinite(v) ? v : Number(it.precio) || 0 }
+                              })
                             }}
-                            w="160px"
+                            maxW="160px"
                           >
                             <NumberInputField
                               textAlign="right"
                               fontFamily="mono"
                               sx={{ fontVariantNumeric: 'tabular-nums' }}
-                              inputMode="decimal"
+                              inputMode="numeric"
                               aria-label={`Precio para ${it.descripcion}`}
                             />
+                            <NumberInputStepper>
+                              <NumberIncrementStepper />
+                              <NumberDecrementStepper />
+                            </NumberInputStepper>
                           </NumberInput>
-                        </HStack>
+                        </Box>
 
-                        <HStack>
-                          <Button
-                            variant="outline"
-                            colorScheme="red"
-                            onClick={() => setRemoveTarget(it)}
-                          >
-                            Eliminar
-                          </Button>
-                        </HStack>
-                      </HStack>
+                        <Box
+                          textAlign="right"
+                          minW="160px"
+                          ml={{ md: 'auto' }}
+                          alignSelf={{ base: 'flex-end', md: 'auto' }}
+                        >
+                          <Text fontSize="md" color={muted}>Subtotal</Text>
+                          <Text fontWeight="semibold" fontFamily="mono" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {money((Number(it.cantidad) || 0) * (Number(it.precio) || 0))}
+                          </Text>
+                        </Box>
+                      </Stack>
                     </CardBody>
                   </Card>
                 ))
@@ -598,7 +623,7 @@ export default function NuevoPedido() {
             </Box>
             <Heading size="xl" lineHeight="1.2">Pedido enviado</Heading>
             <Text color={useColorModeValue('gray.600','gray.300')} maxW="72ch" lineHeight="1.45">
-              Tu pedido ha sido activado y enviado para revisión. En breve podrás ver su estado actualizado.
+              Tu pedido ha sido creato y enviado para aprobación. En breve podrás ver su estado actualizado.
             </Text>
           </VStack>
 
@@ -670,7 +695,7 @@ export default function NuevoPedido() {
 
                       <HStack spacing="6" flexWrap="wrap">
                         <VStack align="start" spacing="0" minW="220px">
-                          <Text fontSize="xs" color={useColorModeValue('gray.500','gray.400')}>Ítems</Text>
+                          <Text fontSize="xs" color={useColorModeValue('gray.500','gray.400')}>Artículos</Text>
                           <Text fontWeight="semibold" fontFamily="mono" sx={{ fontVariantNumeric: 'tabular-nums' }}>{totalItems}</Text>
                         </VStack>
                         <VStack align="start" spacing="0" minW="220px">
@@ -700,7 +725,7 @@ export default function NuevoPedido() {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Eliminar ítem
+              Eliminar artículo
             </AlertDialogHeader>
 
             <AlertDialogBody>

@@ -328,7 +328,6 @@ export default function PedidoDetalle(){
         direction={{ base: 'column', md: 'row' }}
         align={{ base: 'stretch', md: 'center' }}
         justify="space-between"
-        bg={barBg}
         borderBottom="1px solid"
         borderColor={barBorder}
         pb="3"
@@ -341,14 +340,14 @@ export default function PedidoDetalle(){
               aria-label="Volver a pedidos"
               icon={<ArrowBackIcon />}
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => navigate('/pedidos')}
             />
           </Tooltip>
 
-          <Tabs variant="unstyled" defaultIndex={0}>
+          <Tabs variant="line" defaultIndex={0}>
             <TabList>
-              <AccentTab label="Ítems" count={items.length} underline={underline} pillBg={pillBg} pillColor={pillColor} />
+              <AccentTab label="Artículos" count={items.length} underline={underline} pillBg={pillBg} pillColor={pillColor} />
               <AccentTab label="Automatizaciones" count={0} underline={underline} pillBg={pillBg} pillColor={pillColor} disabled />
             </TabList>
           </Tabs>
@@ -484,7 +483,7 @@ export default function PedidoDetalle(){
                   <Stack
                     direction={{ base: 'column', md: 'row' }}
                     align={{ base: 'stretch', md: 'end' }}
-                    spacing="6"
+                    spacing="2"
                   >
                     <Box>
                       <Text fontSize="md" color={muted} mb="1">Cantidad</Text>
@@ -527,7 +526,7 @@ export default function PedidoDetalle(){
                           patchItemInCache(it.id, { precio: val })
                           setDirtyIds(prev => new Set(prev).add(it.id))
                         }}
-                        maxW="200px"
+                        maxW="160px"
                         isDisabled={!canEdit}
                       >
                         <NumberInputField
@@ -562,7 +561,7 @@ export default function PedidoDetalle(){
 
             {items.length===0 && (
               <Box bg="white" _dark={{ bg: 'gray.800' }} borderWidth="1px" rounded="md" p="10" textAlign="center" color={muted}>
-                Este pedido no tiene ítems.
+                Este pedido no tiene Artículos.
               </Box>
             )}
           </Stack>
@@ -576,7 +575,7 @@ export default function PedidoDetalle(){
           isOpen={adding}
           onClose={closeAdd}
           onAdd={handleDraftAdd}
-          pedidoId={id}
+          // Use global availability so numbers match Inventario/NuevoPedido
         />
       </Suspense>
 
@@ -640,7 +639,7 @@ export default function PedidoDetalle(){
 
             <AlertDialogBody>
               ¿Seguro que deseas eliminar este pedido? Esta acción no se puede deshacer.
-              Se eliminarán el pedido y todos sus ítems.
+              Se eliminarán el pedido y todos sus Artículos.
             </AlertDialogBody>
 
             <AlertDialogFooter>

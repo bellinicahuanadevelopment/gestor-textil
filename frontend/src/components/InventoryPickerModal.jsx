@@ -20,8 +20,9 @@ export default function InventoryPickerModal({
   const accent = prefs?.accent || 'teal'
   const authedFetchJson = useAuthedFetchJson()
 
-  const inputBg = useColorModeValue('blackAlpha.50','whiteAlpha.100')
-  const inputBorder = useColorModeValue('blackAlpha.200','whiteAlpha.300')
+  const hoverBg = useColorModeValue('blackAlpha.200', 'whiteAlpha.400')
+  const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
   const headerBg = useColorModeValue('white','gray.800')
   const borderColor = useColorModeValue('blackAlpha.200','whiteAlpha.300')
   const compact = useBreakpointValue({ base: true, md: false })
@@ -87,6 +88,7 @@ export default function InventoryPickerModal({
   const safePage = Math.min(page, totalPages)
   const start = (safePage - 1) * pageSize
   const pageRows = filtered.slice(start, start + pageSize)
+
 
   function availableFor(row){
     // IMPORTANT: do not subtract “mine” again; cantidad_disponible is already the usable figure.
@@ -167,7 +169,8 @@ export default function InventoryPickerModal({
                 <Text fontSize="sm" color="gray.500">Mantener abierto</Text>
                 <Switch
                   isChecked={keepOpen}
-                  onChange={(e)=>onToggleKeepOpen(e.target.checked)}
+                  onChange={(e) => onToggleKeepOpen(e.target.checked)}
+                  colorScheme={accent}
                 />
               </HStack>
             </HStack>
@@ -183,8 +186,7 @@ export default function InventoryPickerModal({
                   onChange={e=>{ setQ(e.target.value); setPage(1) }}
                   variant="filled"
                   bg={inputBg}
-                  borderColor={inputBorder}
-                  _hover={{ bg: inputBg }}
+                  _hover={{ bg: hoverBg }}
                   _focus={{ bg: inputBg, borderColor: inputBorder }}
                 />
               </InputGroup>

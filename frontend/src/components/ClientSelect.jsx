@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
-  Box, Input, InputGroup, InputRightElement, IconButton, Spinner,
+  Box, Input, InputGroup, InputLeftElement, InputRightElement, IconButton, Spinner,
   Popover, PopoverTrigger, PopoverContent, PopoverBody,
   List, ListItem, Text, useOutsideClick, useColorModeValue
 } from '@chakra-ui/react'
@@ -28,22 +28,42 @@ function highlight(text, q) {
  *  - onChange(client|null)
  *  - placeholder
  */
-export default function ClientSelect({ value, onChange, placeholder = 'Buscar cliente…' }) {
+export default function ClientSelect({ value, onChange, placeholder = 'Nombre' }) {
   const { authedFetch } = useAuthedFetch()
   const [query, setQuery] = useState(value?.nombre || '')
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [options, setOptions] = useState([])
   const boxRef = useRef(null)
+
   const bg = useColorModeValue('white', 'gray.800')
   const border = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
-  const hoverBg = useColorModeValue('blackAlpha.50','whiteAlpha.100')
+  const hoverBg = useColorModeValue('blackAlpha.200', 'whiteAlpha.400')
+  const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
 
+  // Close & normalize when clicking outside
+  useOutsideClick({
+    ref: boxRef,
+    handler: () => {
+      // Close and normalize the field:
+      // - If a value is selected, revert to it.
+      // - If nothing is selected, clear whatever was typed.
+      setOpen(false)
+      const sel = (value?.nombre || '').trim()
+      const typed = query.trim()
+      if (value?.id) {
+        if (typed !== sel) setQuery(sel)
+      } else if (typed) {
+        setQuery('')
+      }
+    }
+  })
 
-  useOutsideClick({ ref: boxRef, handler: () => setOpen(false) })
-
+  // Keep input in sync if parent selection changes
   useEffect(() => { setQuery(value?.nombre || '') }, [value?.id])
 
+  // Fetch options (debounced) when open and query present
   useEffect(() => {
     let alive = true
     const q = query.trim()
@@ -60,26 +80,46 @@ export default function ClientSelect({ value, onChange, placeholder = 'Buscar cl
       } finally {
         if (alive) setLoading(false)
       }
-    }, 180) // debounce
+    }, 180)
     return () => { alive = false; clearTimeout(timer) }
   }, [query, open, authedFetch])
 
   function select(opt) {
     onChange?.(opt || null)
     setOpen(false)
+    setQuery(opt?.nombre || '')
   }
 
   return (
     <Box position="relative" ref={boxRef}>
-      <Popover isOpen={open} placement="bottom-start" autoFocus={false} matchWidth={true}>
+      <Popover isOpen={open} placement="bottom-start" autoFocus={false} matchWidth>
         <PopoverTrigger>
           <InputGroup onFocus={() => setOpen(true)}>
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="gray.400" />
+            </InputLeftElement>
             <Input
               value={query}
               placeholder={placeholder}
               onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  // Same normalization as on outside click
+                  setOpen(false)
+                  const sel = (value?.nombre || '').trim()
+                  const typed = query.trim()
+                  if (value?.id) {
+                    if (typed !== sel) setQuery(sel)
+                  } else if (typed) {
+                    setQuery('')
+                  }
+                }
+              }}
               variant="filled"
               autoComplete="off"
+              bg={inputBg}
+              _hover={{ bg: hoverBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
             />
             <InputRightElement>
               {loading ? (
@@ -92,12 +132,11 @@ export default function ClientSelect({ value, onChange, placeholder = 'Buscar cl
                   variant="ghost"
                   onClick={() => { setQuery(''); select(null) }}
                 />
-              ) : (
-                <SearchIcon color="gray.400" />
-              )}
+              ) : null}
             </InputRightElement>
           </InputGroup>
         </PopoverTrigger>
+
         <PopoverContent bg={bg} borderColor={border} maxH="260px" overflow="auto">
           <PopoverBody p="0">
             <List>

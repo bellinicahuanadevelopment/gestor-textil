@@ -9,3 +9,5 @@
 - [ ] Logística de entrada y salida
 - [x] cada movimiento de inventario debe tener un número de referencia
 - [x] mostrar número de referncia de los pedidos
+- [ ] Reject Order
+- [ ] Not all orders require approval (Approval request rules - Cartera, Cliente específico, Vendedor específico)

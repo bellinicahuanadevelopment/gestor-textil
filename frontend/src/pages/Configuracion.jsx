@@ -155,7 +155,7 @@ export default function Configuracion(){
       <Heading
         ref={headingRef}
         tabIndex={-1}
-        size="lg"
+        size="xl"
         mb="1"
         lineHeight="1.2"
         letterSpacing="-0.02em"
@@ -174,7 +174,6 @@ export default function Configuracion(){
         isLazy
       >
         <TabList
-          bg={barBg}
           borderBottom="1px solid"
           borderColor={barBorder}
           pb="2"

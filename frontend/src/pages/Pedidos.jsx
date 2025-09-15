@@ -2,14 +2,15 @@ import React, { useMemo, useState } from 'react'
 import {
   Box, Heading, Stack, Card, CardHeader, CardBody, HStack, Text, Badge,
   Button, Input, InputGroup, InputLeftElement, Select, Spacer,
-  useColorModeValue, IconButton, Skeleton, SkeletonText,
-  useBreakpointValue, FormControl, FormLabel, usePrefersReducedMotion
+  useColorModeValue, IconButton, Skeleton, SkeletonText, Divider,
+  useBreakpointValue, usePrefersReducedMotion
 } from '@chakra-ui/react'
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon, AddIcon } from '@chakra-ui/icons'
 import { useThemePrefs } from '../theme/ThemeContext'
 import { Link } from 'react-router-dom'
 import { useOrdersQuery } from '../lib/hooks/useOrdersQuery'
 
+/* Utils */
 function fold(v) {
   return (v ?? '')
     .toString()
@@ -17,39 +18,54 @@ function fold(v) {
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
 }
-
 function formatRef(id) {
   if (!id) return '—'
   const s = String(id)
   const short = s.includes('-') ? s.split('-')[0] : s.slice(0, 8)
   return short.toUpperCase()
 }
-
 function money(n) {
   try {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(n || 0))
   } catch { return `${n}` }
+}
+function statusColor(s) {
+  const k = String(s || '').toLowerCase()
+  if (k === 'draft') return 'gray'
+  if (k === 'submitted') return 'blue'
+  if (k === 'approved') return 'green'
+  if (k === 'cancelled') return 'red'
+  return 'gray'
 }
 
 export default function Pedidos() {
   const { prefs } = useThemePrefs()
   const accent = prefs?.accent || 'teal'
 
+  // Tokens consistent with PedidoDetalle
   const headingColor = useColorModeValue('gray.800', 'gray.100')
   const muted = useColorModeValue('gray.600', 'gray.400')
   const inputBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const hoverBg = useColorModeValue('blackAlpha.200', 'whiteAlpha.400')
   const inputBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
+
   const barBorder = useColorModeValue('blackAlpha.200', 'whiteAlpha.300')
   const panelBg = useColorModeValue('transparent', 'transparent')
+  const stickyBg = useColorModeValue('white', 'gray.900')
 
   const prefersReducedMotion = usePrefersReducedMotion()
   const transition = prefersReducedMotion ? 'none' : 'border-color 150ms ease, box-shadow 150ms ease'
 
-  const { data: rows = [], isLoading, isError, error } = useOrdersQuery()
-
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
+
+  // 1) Keep the list fresh
+  const { data: rows = [], isLoading, isError, error } = useOrdersQuery({
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
 
   const compact = useBreakpointValue({ base: true, md: false })
 
@@ -71,32 +87,26 @@ export default function Pedidos() {
   const end = Math.min(start + pageSize, total)
   const pageRows = filtered.slice(start, end)
 
-  function statusColor(s) {
-    if (s === 'draft') return 'gray'
-    if (s === 'submitted') return 'blue'
-    if (s === 'approved') return 'green'
-    if (s === 'cancelled') return 'red'
-    return 'gray'
-  }
-
-  const skeletonCards = Array.from({ length: pageSize })
+  const skeletonCount = Math.max(3, Math.min(pageSize, 5))
 
   return (
     <Box as="main">
+      {/* Title + primary action (unchanged) */}
       <HStack justify="space-between" align="center" mb="4">
-        <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
+        <Heading size="xl" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
           Pedidos
         </Heading>
 
         {compact ? (
-          <IconButton
+          <Button
             as={Link}
             to="/pedidos/nuevo"
-            aria-label="Crear pedido"
-            icon={<AddIcon />}
             colorScheme={accent}
             variant="solid"
-          />
+            leftIcon={<AddIcon />}
+          >
+            Nuevo
+          </Button>
         ) : (
           <Button
             as={Link}
@@ -105,70 +115,83 @@ export default function Pedidos() {
             variant="solid"
             leftIcon={<AddIcon />}
           >
-            Crear pedido
+            Nuevo Pedido
           </Button>
         )}
       </HStack>
 
-      <HStack mb="4" spacing="3" align="end" wrap="wrap">
-        <FormControl maxW="520px" flex="1">
-          <FormLabel mb="1" fontSize="sm" color={muted}>Buscar</FormLabel>
-          <InputGroup>
+      <Box
+        top="0"
+        zIndex="1"
+        borderBottom="1px solid"
+        borderColor={barBorder}
+        py="3"
+        mb="3"
+      >
+        <HStack spacing="3" align="center" wrap="wrap">
+          <InputGroup maxW="520px" flex="8">
             <InputLeftElement pointerEvents="none">
               <SearchIcon color="gray.400" aria-hidden="true" />
             </InputLeftElement>
             <Input
-              aria-label="Buscar por cliente, dirección, estado o referencia"
-              placeholder="Cliente, dirección, estado o referencia"
+              aria-label="Cliente, dirección o ref."
+              placeholder="Cliente, dirección o ref."
               value={query}
               onChange={e => { setQuery(e.target.value); setPage(1) }}
               variant="filled"
               bg={inputBg}
-              _hover={{ bg: inputBg }}
+              _hover={{ bg: hoverBg }}
               _focus={{ bg: inputBg, borderColor: inputBorder }}
               lineHeight="1.45"
             />
           </InputGroup>
-        </FormControl>
 
-        <Spacer />
+          <Spacer />
 
-        <FormControl w="auto">
-          <FormLabel mb="1" fontSize="sm" color={muted}>Mostrar</FormLabel>
-          <Select
-            value={pageSize}
-            onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
-            size="sm"
-            w="84px"
-            aria-label="Cantidad de pedidos por página"
-          >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={15}>15</option>
-          </Select>
-        </FormControl>
-      </HStack>
+          <HStack>
+            <Text fontSize="sm" color={muted}>Mostrar</Text>
+            <Select
+              aria-label="Cantidad de pedidos por página"
+              value={pageSize}
+              onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
+              size="sm"
+              h="40px"
+              w="84px"
+              variant="filled"
+              bg={inputBg}
+              _hover={{ bg: hoverBg }}
+              _focus={{ bg: inputBg, borderColor: inputBorder }}
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+            </Select>
+          </HStack>
+        </HStack>
+      </Box>
 
+      {/* Container consistent with detail page */}
       <Box borderRadius="md" border="1px solid" borderColor={barBorder} bg={panelBg} p={{ base: 2, md: 3 }}>
         <Stack spacing="4">
+          {/* 5) Loading skeletons */}
           {isLoading ? (
-            skeletonCards.map((_, i) => (
+            Array.from({ length: skeletonCount }).map((_, i) => (
               <Card key={`s-${i}`} variant="outline" aria-busy="true" aria-live="polite">
                 <CardHeader pb="2">
                   <HStack justify="space-between" align="start">
                     <Box w="full">
-                      <Skeleton height="28px" maxW="240px" />
-                      <SkeletonText mt="2" noOfLines={1} maxW="300px" />
+                      <Skeleton height="28px" maxW="300px" />
+                      <SkeletonText mt="2" noOfLines={2} maxW="360px" />
                     </Box>
                     <Skeleton height="22px" width="80px" />
                   </HStack>
                 </CardHeader>
                 <CardBody pt="2">
-                  <HStack justify="space-between" wrap="wrap">
-                    <SkeletonText noOfLines={1} maxW="200px" />
-                    <HStack>
-                      <SkeletonText noOfLines={1} maxW="220px" />
-                    </HStack>
+                  <SkeletonText noOfLines={1} maxW="220px" />
+                  <Divider my="3" />
+                  <HStack justify="space-between" align="center">
+                    <SkeletonText noOfLines={1} maxW="180px" />
+                    <Skeleton height="20px" width="140px" />
                   </HStack>
                 </CardBody>
               </Card>
@@ -179,15 +202,17 @@ export default function Pedidos() {
             </Box>
           ) : (
             <>
+              {/* 3) Card structure (clickable, status chip, right-aligned total) */}
               {pageRows.map(p => (
                 <Card
                   key={p.id}
                   as={Link}
                   to={`/pedidos/${p.id}`}
+                  role="link"
                   variant="outline"
                   cursor="pointer"
                   _hover={{ borderColor: `${accent}.300` }}
-                  _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }}
+                  _focusWithin={{ borderColor: `${accent}.400`, boxShadow: 'outline' }} // keep your focus ring
                   sx={{ transition }}
                 >
                   <CardHeader pb="2">
@@ -196,43 +221,63 @@ export default function Pedidos() {
                         <Heading size="lg" color={headingColor} lineHeight="1.2" letterSpacing="-0.02em">
                           {p.cliente_nombre}
                         </Heading>
-                        <Text fontSize="xs" color="gray.500">Ref: {formatRef(p.id)}</Text>
-                        <Text fontSize="sm" color="gray.500">{p.direccion_entrega}</Text>
+                        <Text fontSize="xs" color="gray.500" mt="0.5">Ref: {formatRef(p.id)}</Text>
+                        {/* Puedes mostrar dirección u otros datos aquí si lo deseas */}
                       </Box>
-                      <Badge colorScheme={statusColor(p.status)} textTransform="none" aria-label={`Estado: ${p.status}`}>
+
+                      {/* Status chip with dot, consistent with detail page */}
+                      <Badge
+                        colorScheme={statusColor(p.status)}
+                        textTransform="none"
+                        aria-label={`Estado: ${p.status}`}
+                        alignSelf="start"
+                      >
+                        <Box as="span" mr="1" w="2" h="2" rounded="full" bg="currentColor" display="inline-block" aria-hidden="true" />
                         {p.status}
                       </Badge>
                     </HStack>
                   </CardHeader>
+
                   <CardBody pt="2">
-                    <HStack justify="space-between" wrap="wrap" align="baseline">
-                      <Text fontSize="sm" color={muted}>Entrega: {p.fecha_entrega}</Text>
-                      <HStack>
-                        <Text fontSize="sm" color="gray.500">Artículos:</Text>
-                        <Text
-                          fontWeight="semibold"
-                          fontFamily="mono"
-                          sx={{ fontVariantNumeric: 'tabular-nums' }}
-                        >
-                          {p.items_count}
-                        </Text>
-                        <Text fontSize="sm" color="gray.500" ml="4">Total:</Text>
-                        <Text
-                          fontWeight="semibold"
-                          fontFamily="mono"
-                          sx={{ fontVariantNumeric: 'tabular-nums' }}
-                        >
-                          {money(p.total)}
-                        </Text>
+                    <Stack spacing="3">
+                      {/* Aquí va el resto del contenido del body (si lo hay) */}
+                      {p.direccion_entrega ? (
+                        <Text fontSize="sm" color={muted}>{p.direccion_entrega}</Text>
+                      ) : null}
+
+                      {/* Divider que separa del bloque Entrega/Total */}
+                      <Divider />
+
+                      <HStack justify="space-between" align="center" wrap="wrap">
+                        <Text fontSize="sm" color={muted}>Entrega: {p.fecha_entrega}</Text>
+
+                        <HStack spacing="2" minW="160px" justify="flex-end">
+                          <Text fontSize="sm" color="gray.500">Total:</Text>
+                          <Text
+                            fontWeight="semibold"
+                            fontFamily="mono"
+                            sx={{ fontVariantNumeric: 'tabular-nums' }}
+                          >
+                            {money(p.total)}
+                          </Text>
+                        </HStack>
                       </HStack>
-                    </HStack>
+                    </Stack>
                   </CardBody>
                 </Card>
               ))}
 
+              {/* Empty state */}
               {pageRows.length === 0 && (
-                <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color="gray.500">
-                  {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
+                <Box borderWidth="1px" rounded="md" p="10" textAlign="center" color={muted}>
+                  <Stack spacing="4" align="center">
+                    <Text>
+                      {total === 0 ? 'No hay pedidos registrados.' : 'Sin resultados para tu búsqueda.'}
+                    </Text>
+                    <Button as={Link} to="/pedidos/nuevo" colorScheme={accent} leftIcon={<AddIcon />}>
+                      Nuevo pedido
+                    </Button>
+                  </Stack>
                 </Box>
               )}
             </>
@@ -240,6 +285,7 @@ export default function Pedidos() {
         </Stack>
       </Box>
 
+      {/* Pager (unchanged, wording consistent) */}
       <HStack mt="6" justify="space-between" align="center" flexWrap="wrap" gap="3">
         <Text fontSize="sm" color={muted} role="status" aria-live="polite">
           {isLoading ? 'Cargando…' : (total === 0 ? '0' : `${start + 1}–${end}`) + ` de ${total}`}
